@@ -101,7 +101,7 @@ flowchart LR
 ┌────────────────────────────────────────────────────────────────────────┐
 │                        COMPETENCY ARCHITECTURE                         │
 ├──────────────────────────┬─────────────────────────────────────────────┤
-│ 1. Hardware & Embedded   │ • ESP32-WROOM-32 Microcontroller Architecture│
+│ 1. Hardware & Embedded   │ • ESP32-WROOM Microcontroller Architecture  │
 │                          │ • Bus Protocol: OneWire (DS18B20) & I2C     │
 │                          │ • Sensor: Dual DS18B20 Stainless, BH1750 Lux│
 │                          │ • Actuators: DC Blower Fan 5V Relay Control │
