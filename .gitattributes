@@ -1,0 +1,17 @@
+# Auto-detect binary files
+*.stl binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.zip binary
+
+# Text files
+*.md text
+*.ino text
+*.gs text
+*.html text
+*.css text
+*.js text

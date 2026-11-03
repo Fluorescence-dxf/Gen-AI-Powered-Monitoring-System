@@ -1,0 +1,437 @@
+<script>
+// ============================================================
+//  CAMP-AI — Frontend JS
+//  Compatible: Google Apps Script HTML Service
+//  Backend functions (Kode.gs): getDashboardData, askGemini
+// ============================================================
+
+// ============================================================
+// 1. CLOCK & GREETING
+// ============================================================
+function updateClock() {
+  var now  = new Date();
+  var h    = String(now.getHours()).padStart(2, '0');
+  var m    = String(now.getMinutes()).padStart(2, '0');
+  document.getElementById('js-time').textContent = h + ':' + m + ' WIB';
+
+  var hour = now.getHours();
+  var greeting = 'Selamat malam,';
+  if (hour >= 5  && hour < 11) greeting = 'Selamat pagi,';
+  else if (hour >= 11 && hour < 15) greeting = 'Selamat siang,';
+  else if (hour >= 15 && hour < 18) greeting = 'Selamat sore,';
+  document.getElementById('js-greeting').textContent = greeting;
+}
+updateClock();
+setInterval(updateClock, 60000);
+
+// ============================================================
+// 2. EDITABLE USERNAME (simpan ke localStorage browser)
+// ============================================================
+(function() {
+  var nameEl = document.getElementById('js-username');
+  try {
+    var saved = localStorage.getItem('CampAI_user');
+    if (saved) nameEl.textContent = saved;
+  } catch(e) { /* localStorage mungkin diblokir di beberapa context */ }
+
+  nameEl.addEventListener('blur', function() {
+    var name = this.textContent.trim() || 'User';
+    this.textContent = name;
+    try { localStorage.setItem('CampAI_user', name); } catch(e) {}
+  });
+  nameEl.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); this.blur(); }
+  });
+})();
+
+// ============================================================
+// 3. TRIVIA CARD (static, no API needed)
+// ============================================================
+var TRIVIAS = [
+  "Metode Psikrometer Assmann menggunakan selisih suhu bola basah dan bola kering dengan sirkulasi udara stabil untuk menentukan kelembapan presisi tinggi.",
+  "Sensor lux BH1750 (I2C) menangkap rentang cahaya 1 - 65.535 lx — sangat efektif untuk memantau fotosintesis dan mencegah etiolasi pada melon.",
+  "Menjaga RH di angka 65–75% pada fase vegetatif melon memastikan laju transpirasi optimal dan mencegah kerusakan ujung daun (tip burn).",
+  "Ventilasi aktif dan kipas aspirasi tidak hanya menurunkan panas berlebih, tapi juga menjaga laju evaporasi kain basah tetap stabil.",
+  "Suhu bola basah yang mendekati suhu bola kering menandakan RH mendekati 100% — resiko serangan cendawan embun tepung (powdery mildew) melon meningkat pesat.",
+  "Kelembapan substrat dan udara yang seimbang mencegah pemecahan buah (fruit cracking) saat pembesaran buah melon Inthanon.",
+  "Formula psikrometrik Perka BMKG No. 04 Tahun 2026 memperhitungkan tekanan atmosfer 101.325 kPa dan konstanta psikrometrik A = 0.0007947 °C^-1."
+];
+
+var triviaEl = document.getElementById('js-trivia-text');
+
+function showRandomTrivia() {
+  triviaEl.classList.add('trivia-card__text--fade');
+  setTimeout(function() {
+    triviaEl.textContent = TRIVIAS[Math.floor(Math.random() * TRIVIAS.length)];
+    triviaEl.classList.remove('trivia-card__text--fade');
+  }, 300);
+}
+// Tampilkan trivia awal
+if (triviaEl) {
+  triviaEl.textContent = TRIVIAS[Math.floor(Math.random() * TRIVIAS.length)];
+}
+document.getElementById('js-btn-trivia').addEventListener('click', showRandomTrivia);
+
+// ============================================================
+// 4. CHART — TAB & NAVIGATION
+// ============================================================
+var CHART_ORDER = ['wb', 'dk', 'lux', 'rh'];
+var currentChartIdx = 0;
+
+var tabs  = document.querySelectorAll('.chart-tab');
+var dots  = document.querySelectorAll('.chart-dot');
+
+function activateChart(idx) {
+  tabs.forEach(function(t) { t.classList.remove('chart-tab--active'); });
+  dots.forEach(function(d) { d.classList.remove('chart-dot--active'); });
+  CHART_ORDER.forEach(function(key) {
+    var el = document.getElementById('chart-' + key);
+    if (el) el.classList.remove('chart-graph--active');
+  });
+
+  if (tabs[idx]) tabs[idx].classList.add('chart-tab--active');
+  if (dots[idx]) dots[idx].classList.add('chart-dot--active');
+  var graphEl = document.getElementById('chart-' + CHART_ORDER[idx]);
+  if (graphEl) graphEl.classList.add('chart-graph--active');
+
+  currentChartIdx = idx;
+}
+
+tabs.forEach(function(tab, idx) {
+  tab.addEventListener('click', function() { activateChart(idx); });
+});
+dots.forEach(function(dot, idx) {
+  dot.addEventListener('click', function() { activateChart(idx); });
+});
+document.getElementById('btn-prev').addEventListener('click', function() {
+  var n = currentChartIdx - 1;
+  activateChart(n < 0 ? CHART_ORDER.length - 1 : n);
+});
+document.getElementById('btn-next').addEventListener('click', function() {
+  var n = currentChartIdx + 1;
+  activateChart(n >= CHART_ORDER.length ? 0 : n);
+});
+
+// ============================================================
+// 5. CHART RENDERING (Menggunakan Chart.js)
+// ============================================================
+
+// Simpan instance chart agar bisa di-destroy sebelum dirender ulang
+var chartInstances = {};
+
+var CHART_CONFIG = {
+  wb:  { field: 'wet',  color: '#D0D6B3', label: '°C',  canvasId: 'canvas-wb'  },
+  dk:  { field: 'dry',  color: '#AAAE7F', label: '°C',  canvasId: 'canvas-dk'  },
+  lux: { field: 'lux',  color: '#E8EDD8', label: 'lux', canvasId: 'canvas-lux' },
+  rh:  { field: 'rh',   color: '#8BE346', label: '%',   canvasId: 'canvas-rh'  }
+};
+
+function renderChart(key, trendData) {
+  var cfg = CHART_CONFIG[key];
+  if (!cfg || trendData.length < 2) return;
+
+  var ctx = document.getElementById(cfg.canvasId);
+  if (!ctx) return;
+
+  // Siapkan Data Sumbu X (Waktu) dan Sumbu Y (Nilai)
+  var labels = trendData.map(function(r) {
+    var d = new Date(r.ts);
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  });
+  var values = trendData.map(function(r) { return parseFloat(r[cfg.field]) || 0; });
+
+  // Hapus grafik lama jika sudah ada
+  if (chartInstances[key]) {
+    chartInstances[key].destroy();
+  }
+
+  // Set font default agar senada dengan dashboard
+  Chart.defaults.color = '#788066';
+  Chart.defaults.font.family = "'DM Sans', sans-serif";
+
+  // Buat Grafik Interaktif
+  chartInstances[key] = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: cfg.label,
+        data: values,
+        borderColor: cfg.color,
+        backgroundColor: cfg.color + '1A', // Transparansi 10%
+        borderWidth: 2.5,
+        pointBackgroundColor: cfg.color,
+        pointBorderColor: '#1A1D16',
+        pointBorderWidth: 2,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        fill: true,
+        tension: 0.4
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      layout: {
+        padding: { top: 10, right: 15, bottom: 0, left: 0 }
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1F2A14',
+          titleColor: '#E8EDD8',
+          bodyColor: cfg.color,
+          borderColor: '#2B381E',
+          borderWidth: 1,
+          padding: 10,
+          displayColors: false,
+          callbacks: {
+            label: function(context) {
+              return context.parsed.y + ' ' + cfg.label;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { color: 'rgba(43, 56, 30, 0.5)', drawBorder: false },
+          ticks: { maxTicksLimit: 6 }
+        },
+        y: {
+          grid: { color: 'rgba(43, 56, 30, 0.5)', drawBorder: false },
+          suggestedMin: Math.min.apply(null, values) * 0.95,
+          suggestedMax: Math.max.apply(null, values) * 1.05
+        }
+      }
+    }
+  });
+}
+
+// ============================================================
+// 6. SENSOR CARDS — update dari data backend
+// ============================================================
+var TEMP_MIN = 18, TEMP_MAX = 35, RH_MIN = 40, RH_MAX = 85;
+
+function getStatusClass(field, value) {
+  if (field === 'dry' || field === 'wet') {
+    if (value > TEMP_MAX) return { cls: 'sensor-card__status--err', label: 'Terlalu Panas' };
+    if (value < TEMP_MIN) return { cls: 'sensor-card__status--err', label: 'Terlalu Dingin' };
+    if (value > 30)       return { cls: 'sensor-card__status--warn', label: 'Perhatian' };
+    return { cls: 'sensor-card__status--ok', label: 'Normal' };
+  }
+  if (field === 'rh') {
+    if (value > RH_MAX) return { cls: 'sensor-card__status--warn', label: 'Terlalu Lembap' };
+    if (value < RH_MIN) return { cls: 'sensor-card__status--warn', label: 'Terlalu Kering' };
+    return { cls: 'sensor-card__status--ok', label: 'Normal' };
+  }
+  if (field === 'lux') {
+    if (value < 5000)  return { cls: 'sensor-card__status--warn', label: 'Redup' };
+    if (value > 50000) return { cls: 'sensor-card__status--warn', label: 'Terlalu Terang' };
+    return { cls: 'sensor-card__status--ok', label: 'Optimal' };
+  }
+  return { cls: 'sensor-card__status--ok', label: 'Normal' };
+}
+
+function updateCard(id, value, field, unit) {
+  var numEl    = document.getElementById('val-' + id);
+  var statusEl = document.getElementById('status-' + id);
+  if (!numEl || value === null || value === undefined) return;
+
+  // Flash animation
+  numEl.classList.add('sensor-card__number--updating');
+  setTimeout(function() { numEl.classList.remove('sensor-card__number--updating'); }, 600);
+
+  // Format value
+  var display = field === 'lux' && value >= 1000
+    ? Math.round(value / 100) / 10 + 'k'
+    : parseFloat(value).toFixed(field === 'lux' ? 0 : 1);
+  numEl.textContent = display;
+
+  // Status badge
+  if (statusEl) {
+    var s = getStatusClass(field, parseFloat(value));
+    statusEl.className = 'sensor-card__status ' + s.cls;
+    statusEl.textContent = s.label;
+  }
+}
+
+function updateTrend(id, trendData, field) {
+  var trendEl = document.getElementById('trend-' + id);
+  if (!trendEl || !trendData || trendData.length < 2) return;
+  var first = parseFloat(trendData[0][field]);
+  var last  = parseFloat(trendData[trendData.length - 1][field]);
+  var delta = last - first;
+  var arrow = delta > 0.1 ? '↗' : delta < -0.1 ? '↘' : '→';
+  var sign  = delta > 0 ? '+' : '';
+  trendEl.textContent = arrow + ' ' + sign + delta.toFixed(1);
+}
+
+// ============================================================
+// 7. FETCH DATA DARI GAS — getDashboardData()
+// ============================================================
+var REFRESH_INTERVAL = 5 * 60 * 1000; // 5 menit
+var loadingEl = document.getElementById('chart-loading');
+
+function onDataSuccess(result) {
+  if (loadingEl) loadingEl.classList.add('hidden');
+  document.getElementById('js-system-status').textContent = 'Sistem Aktif';
+
+  if (!result || !result.latest) {
+    document.getElementById('js-system-status').textContent = 'Belum Ada Data';
+    return;
+  }
+
+  var lat   = result.latest;
+  var trend = result.trend || [];
+
+  // Update cards
+  updateCard('wet', lat.wet,  'wet',  '°C');
+  updateCard('dry', lat.dry,  'dry',  '°C');
+  updateCard('lux', lat.lux,  'lux',  'lux');
+  updateCard('rh',  lat.rh,   'rh',   '%');
+
+  // Update trends
+  updateTrend('wet', trend, 'wet');
+  updateTrend('dry', trend, 'dry');
+  updateTrend('lux', trend, 'lux');
+  updateTrend('rh',  trend, 'rh');
+
+  // Render charts jika ada data trend
+  if (trend.length > 1) {
+    CHART_ORDER.forEach(function(key) { renderChart(key, trend); });
+  }
+}
+
+function onDataError(err) {
+  if (loadingEl) loadingEl.classList.add('hidden');
+  document.getElementById('js-system-status').textContent = 'Gagal Memuat';
+  console.error('getDashboardData error:', err);
+}
+
+function fetchDashboardData() {
+  if (typeof google !== 'undefined' && google.script && google.script.run) {
+    google.script.run
+      .withSuccessHandler(onDataSuccess)
+      .withFailureHandler(onDataError)
+      .getDashboardData();
+  } else {
+    // Fallback: preview mode — generate dummy trend data
+    console.warn('google.script.run tidak tersedia — mode preview, memuat data simulasi.');
+    if (loadingEl) loadingEl.classList.add('hidden');
+    var now = Date.now();
+    var dummyTrend = [];
+    for (var i = 23; i >= 0; i--) {
+      dummyTrend.push({
+        ts:  new Date(now - i * 5 * 60000).toISOString(),
+        wet: (24 + Math.random() * 3).toFixed(1),
+        dry: (29 + Math.random() * 4).toFixed(1),
+        lux: Math.round(15000 + Math.random() * 5000),
+        rh:  Math.round(68 + Math.random() * 10)
+      });
+    }
+    var last = dummyTrend[dummyTrend.length - 1];
+    onDataSuccess({ latest: { wet: last.wet, dry: last.dry, lux: last.lux, rh: last.rh }, trend: dummyTrend });
+  }
+}
+
+// Mulai fetch data
+fetchDashboardData();
+setInterval(fetchDashboardData, REFRESH_INTERVAL);
+
+// ============================================================
+// 8. CHAT — askGemini()
+// ============================================================
+var chatMessages = document.getElementById('chat-messages');
+var chatInput    = document.getElementById('chat-input');
+var sendBtn      = document.getElementById('chat-send-btn');
+var aiStatusEl   = document.getElementById('ai-status');
+var plantInput   = document.getElementById('plant-input');
+
+// Tambahkan pesan ke UI
+function appendMessage(role, text) {
+  var div = document.createElement('div');
+  div.className = 'chat-message chat-message--' + role;
+  
+  var bubble = document.createElement('div');
+  bubble.className = 'chat-message__bubble';
+  
+  // Format teks respons: escape HTML, parsing markdown tebal/miring, dan newline
+  var formattedText = String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/\n/g, '<br>');
+    
+  bubble.innerHTML = formattedText;
+  
+  div.appendChild(bubble);
+  chatMessages.appendChild(div);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+  return div;
+}
+
+// Typing indicator
+function showTyping() {
+  var div = document.createElement('div');
+  div.className = 'chat-message chat-message--ai';
+  div.id = 'typing-indicator';
+  div.innerHTML = '<div class="chat-typing"><span></span><span></span><span></span></div>';
+  chatMessages.appendChild(div);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+function hideTyping() {
+  var el = document.getElementById('typing-indicator');
+  if (el) el.parentNode.removeChild(el);
+}
+
+function setInputLocked(locked) {
+  chatInput.disabled  = locked;
+  sendBtn.disabled    = locked;
+  aiStatusEl.textContent = locked ? '● Menganalisis...' : '● Online';
+  aiStatusEl.className   = 'chat-panel__status' + (locked ? ' thinking' : '');
+}
+
+function handleSend() {
+  var msg = chatInput.value.trim();
+  if (!msg) return;
+
+  var plant = (plantInput.value || 'Melon Inthanon').trim();
+
+  appendMessage('user', msg);
+  chatInput.value = '';
+  setInputLocked(true);
+  showTyping();
+
+  if (typeof google !== 'undefined' && google.script && google.script.run) {
+    google.script.run
+      .withSuccessHandler(function(reply) {
+        hideTyping();
+        appendMessage('ai', reply || '(Tidak ada respons)');
+        setInputLocked(false);
+      })
+      .withFailureHandler(function(err) {
+        hideTyping();
+        appendMessage('ai', '⚠️ Gagal menghubungi CAMP-AI: ' + (err.message || err));
+        setInputLocked(false);
+      })
+      .askGemini(msg, plant);
+  } else {
+    // Fallback preview mode
+    setTimeout(function() {
+      hideTyping();
+      appendMessage('ai', '[Preview Mode] CAMP-AI tidak terkoneksi ke Google Apps Script backend. Deploy ke GAS untuk mengaktifkan Gemini API.');
+      setInputLocked(false);
+    }, 1200);
+  }
+}
+
+sendBtn.addEventListener('click', handleSend);
+chatInput.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { 
+    e.preventDefault(); 
+    handleSend(); 
+  }
+});
+</script>

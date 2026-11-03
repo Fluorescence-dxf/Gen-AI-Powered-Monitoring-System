@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <base target="_top">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CAMP-AI: Smart Greenhouse Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet" />
+  
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <?!= include('CSS'); ?>
+</head>
+<body>
+
+<div class="app">
+  <main class="main">
+
+    <!-- ===== HEADER ===== -->
+    <header class="header">
+      <div class="header__left">
+        <p class="header__greeting" id="js-greeting">Selamat pagi,</p>
+        <h1 class="header__title">
+          Hi, <span id="js-username" class="editable-name" contenteditable="true" spellcheck="false">Agronom</span>! 👋
+        </h1>
+      </div>
+      <div class="header__right">
+        <div class="header__badge">
+          <span class="header__badge-dot"></span>
+          <span id="js-system-status">Memuat...</span>
+        </div>
+        <div class="header__time" id="js-time">00:00 WIB</div>
+      </div>
+    </header>
+
+    <!-- ===== DASHBOARD GRID ===== -->
+    <div class="dashboard-wrapper">
+
+      <!-- 1. SENSOR CARDS (4 buah) -->
+      <section class="cards-grid">
+
+        <!-- Card: Suhu Bola Basah -->
+        <div class="sensor-card sensor-card--wb">
+          <div class="sensor-card__header">
+            <span class="sensor-card__label">Suhu Bola Basah</span>
+            <span class="sensor-card__icon">💧</span>
+          </div>
+          <div class="sensor-card__value">
+            <span class="sensor-card__number" id="val-wet">--</span>
+            <span class="sensor-card__unit">°C</span>
+          </div>
+          <div class="sensor-card__footer">
+            <span class="sensor-card__status sensor-card__status--ok" id="status-wet">Normal</span>
+            <span class="sensor-card__trend" id="trend-wet">-</span>
+          </div>
+        </div>
+
+        <!-- Card: Suhu Bola Kering -->
+        <div class="sensor-card sensor-card--dk">
+          <div class="sensor-card__header">
+            <span class="sensor-card__label">Suhu Bola Kering</span>
+            <span class="sensor-card__icon">🌡️</span>
+          </div>
+          <div class="sensor-card__value">
+            <span class="sensor-card__number" id="val-dry">--</span>
+            <span class="sensor-card__unit">°C</span>
+          </div>
+          <div class="sensor-card__footer">
+            <span class="sensor-card__status sensor-card__status--ok" id="status-dry">Normal</span>
+            <span class="sensor-card__trend" id="trend-dry">-</span>
+          </div>
+        </div>
+
+        <!-- Card: Intensitas Cahaya -->
+        <div class="sensor-card sensor-card--lux">
+          <div class="sensor-card__header">
+            <span class="sensor-card__label">Intensitas Cahaya</span>
+            <span class="sensor-card__icon">☀️</span>
+          </div>
+          <div class="sensor-card__value">
+            <span class="sensor-card__number" id="val-lux">--</span>
+            <span class="sensor-card__unit">lux</span>
+          </div>
+          <div class="sensor-card__footer">
+            <span class="sensor-card__status sensor-card__status--ok" id="status-lux">Optimal</span>
+            <span class="sensor-card__trend" id="trend-lux">-</span>
+          </div>
+        </div>
+
+        <!-- Card: Kelembapan RH -->
+        <div class="sensor-card sensor-card--rh">
+          <div class="sensor-card__header">
+            <span class="sensor-card__label">Kelembapan Udara</span>
+            <span class="sensor-card__icon">🌫️</span>
+          </div>
+          <div class="sensor-card__value">
+            <span class="sensor-card__number" id="val-rh">--</span>
+            <span class="sensor-card__unit">% RH</span>
+          </div>
+          <div class="sensor-card__footer">
+            <span class="sensor-card__status sensor-card__status--ok" id="status-rh">Normal</span>
+            <span class="sensor-card__trend" id="trend-rh">-</span>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- 2. CHART PANEL -->
+      <section class="chart-panel">
+        <div class="chart-panel__header">
+          <div>
+            <h2 class="chart-panel__title">Grafik Sensor</h2>
+            <p class="chart-panel__subtitle" id="chart-subtitle">Data spasial 3 Modul CAMP-AI Greenhouse</p>
+          </div>
+          <div class="chart-panel__tabs">
+            <button class="chart-tab chart-tab--active" data-chart="wb">Bola Basah</button>
+            <button class="chart-tab" data-chart="dk">Bola Kering</button>
+            <button class="chart-tab" data-chart="lux">Cahaya</button>
+            <button class="chart-tab" data-chart="rh">RH</button>
+          </div>
+        </div>
+
+        <div class="chart-area" id="chart-area">
+          <div class="chart-placeholder" id="chart-loading">
+            <div class="chart-spinner"></div>
+            <span>Memuat data grafik...</span>
+          </div>
+
+          <div class="chart-graph chart-graph--active" id="chart-wb">
+            <div class="chart-graph__plot"><canvas id="canvas-wb"></canvas></div>
+          </div>
+          <div class="chart-graph" id="chart-dk">
+            <div class="chart-graph__plot"><canvas id="canvas-dk"></canvas></div>
+          </div>
+          <div class="chart-graph" id="chart-lux">
+            <div class="chart-graph__plot"><canvas id="canvas-lux"></canvas></div>
+          </div>
+          <div class="chart-graph" id="chart-rh">
+            <div class="chart-graph__plot"><canvas id="canvas-rh"></canvas></div>
+          </div>
+        </div>
+
+        <!-- Navigasi panah & dots -->
+        <div class="chart-panel__nav">
+          <button class="chart-nav-btn" id="btn-prev" aria-label="Grafik Sebelumnya">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
+            </svg>
+          </button>
+          <div class="chart-dots">
+            <span class="chart-dot chart-dot--active"></span>
+            <span class="chart-dot"></span>
+            <span class="chart-dot"></span>
+            <span class="chart-dot"></span>
+          </div>
+          <button class="chart-nav-btn" id="btn-next" aria-label="Grafik Selanjutnya">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
+            </svg>
+          </button>
+        </div>
+      </section>
+
+      <!-- 3. TRIVIA / SMART CARD -->
+      <section class="trivia-card">
+        <div class="trivia-card__overlay"></div>
+        <div class="trivia-card__content">
+          <div class="trivia-card__tag">💡 Tahukah Kamu?</div>
+          <p class="trivia-card__text" id="js-trivia-text">Memuat trivia...</p>
+          <button class="trivia-card__action" id="js-btn-trivia">Trivia Lainnya ↻</button>
+        </div>
+      </section>
+
+      <!-- 4. CHAT PANEL (CampAI via Gemini) -->
+      <section class="chat-panel">
+        <div class="chat-panel__header">
+          <div class="chat-panel__avatar">🌱</div>
+          <div class="chat-panel__info">
+            <span class="chat-panel__name">CAMP-AI Agronomist</span>
+            <span class="chat-panel__status" id="ai-status">● Online</span>
+          </div>
+          <div class="chat-panel__plant-field">
+            <label class="chat-panel__plant-label" for="plant-input">Komoditas:</label>
+            <input class="chat-panel__plant-input" id="plant-input" type="text" value="Melon Inthanon" />
+          </div>
+        </div>
+
+        <div class="chat-messages" id="chat-messages">
+          <div class="chat-message chat-message--ai">
+            <div class="chat-message__bubble">Halo! Saya <strong>CAMP-AI</strong>, asisten agronomi berbasis Google Gemini 1.5 Flash. Saya siap menganalisis mikroklimat greenhouse secara real-time dan memberikan rekomendasi operasional terbaik. Ada yang bisa saya bantu?</div>
+          </div>
+        </div>
+
+        <div class="chat-panel__input-row">
+          <input class="chat-panel__input" id="chat-input" type="text" placeholder="Tanyakan kondisi suhu, kelembapan, ventilasi..." />
+          <button class="chat-panel__send-btn" id="chat-send-btn" aria-label="Kirim Pesan">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <line x1="22" y1="2" x2="11" y2="13"/>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
+          </button>
+        </div>
+      </section>
+
+    </div><!-- /.dashboard-wrapper -->
+  </main>
+</div><!-- /.app -->
+
+<?!= include('JS'); ?>
+</body>
+</html>

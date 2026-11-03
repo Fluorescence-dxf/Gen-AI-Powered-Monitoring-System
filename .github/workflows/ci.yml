@@ -1,0 +1,34 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  markdown-lint:
+    name: Markdown Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint Markdown files
+        uses: DavidAnson/markdownlint-cli2-action@v19
+        with:
+          globs: '**/*.md'
+
+  arduino-compile:
+    name: Arduino Firmware Compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+      - name: Install ESP32 core & libraries
+        run: |
+          arduino-cli core update-index --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core install esp32:esp32 --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli lib install "DallasTemperature"
+          arduino-cli lib install "OneWire"
+          arduino-cli lib install "BH1750"
+          arduino-cli lib install "WiFiManager"
+      - name: Copy config template
+        run: cp Capstone/Firmware/config.h.example Capstone/Firmware/config.h
+      - name: Compile firmware
+        run: arduino-cli compile --fqbn esp32:esp32:esp32 Capstone/Firmware/Capstone.ino

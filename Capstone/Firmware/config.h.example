@@ -1,0 +1,36 @@
+/**
+ * ============================================================================
+ * CAMP-AI: Node Configuration Template
+ * Copy this file to config.h or configure directly in Capstone.ino
+ * ============================================================================
+ */
+
+#ifndef CONFIG_H
+#define CONFIG_H
+
+// Google Apps Script Web App Deployment URL
+// Didapat setelah 'Deploy' -> 'New Deployment' -> 'Web App' (Access: Anyone)
+#define SCRIPT_URL "https://script.google.com/macros/s/AKfycb.../exec"
+
+// Module Configuration:
+// Module 1 (Depan):   MODULE_ID = "Module1", HAS_LUX = true
+// Module 2 (Tengah):  MODULE_ID = "Module2", HAS_LUX = false
+// Module 3 (Belakang): MODULE_ID = "Module3", HAS_LUX = false
+#define MODULE_ID "Module1"
+#define HAS_LUX_SENSOR true
+
+// ESP32 GPIO Pin Assignments
+#define DRY_BULB_PIN 19   // DS18B20 Suhu Bola Kering
+#define WET_BULB_PIN 16   // DS18B20 Suhu Bola Basah
+#define FAN_PIN      26   // Relay Kipas Aspirasi Psikrometer
+
+// Timing Configuration
+#define NTP_SERVER       "pool.ntp.org"
+#define GMT_OFFSET_SEC   (7 * 3600)  // UTC+7 (WIB)
+#define DST_OFFSET_SEC   0
+#define SAMPLING_SECONDS 60          // Durasi sampling aerasi kipas aktif
+#define START_HOUR       0           // Jam operasional mulai (00:00)
+#define END_HOUR         24          // Jam operasional selesai (24:00)
+#define INTERVAL_MIN     15          // Interval transmisi data normal (menit)
+
+#endif // CONFIG_H
