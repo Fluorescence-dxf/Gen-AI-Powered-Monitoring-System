@@ -192,7 +192,8 @@ flowchart LR
 
 - **Institusi:** Departemen Teknik Mesin dan Biosistem, Fakultas Teknologi Pertanian, Institut Pertanian Bogor (IPB University)
 - **Kampus:** IPB Dramaga, Bogor, Jawa Barat 16680, Indonesia
-- **Surel Akademik:** `rafiyandi@apps.ipb.ac.id`
+- **Surel:** `rafiyandipasha@outlook.com`
+- **Surel Akademik:** `rafiyandipasha@apps.ipb.ac.id`
 
 ---
 
