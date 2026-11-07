@@ -49,7 +49,7 @@ function setup() {
 
   // Set default Gemini model jika belum ada
   if (!props.getProperty("GEMINI_MODEL")) {
-    props.setProperty("GEMINI_MODEL", "gemini-1.5-flash");
+    props.setProperty("GEMINI_MODEL", "gemini-flash-latest");
   }
 
   // Setup Sheet RawData jika belum ada
