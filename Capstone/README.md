@@ -383,7 +383,7 @@ Pada greenhouse budidaya Melon Inthanon seluas 200 m² (populasi ~600 tanaman) d
    - `JS.html` $\leftarrow$ salin dari [`Google Apps Script/JS.html`](Capstone/Google%20Apps%20Script/JS.html)
 3. Buka **Project Settings** (ikon roda gigi di menu kiri) $\rightarrow$ **Script Properties** $\rightarrow$ Tambahkan property:
    - `GEMINI_API_KEY`: Kunci API Anda dari [Google AI Studio](https://aistudio.google.com/).
-   - `GEMINI_MODEL`: `gemini-1.5-flash`
+   - `GEMINI_MODEL`: `gemini-flash-latest`
 4. Jalankan fungsi `setup()` sekali dari editor kode untuk membuat database Spreadsheet secara otomatis.
 5. Klik **Deploy** $\rightarrow$ **New Deployment**:
    - Pilih jenis: **Web App**

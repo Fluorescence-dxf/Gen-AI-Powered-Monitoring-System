@@ -47,9 +47,10 @@ function setup() {
     props.setProperty("SPREADSHEET_ID", ss.getId());
   }
 
-  // Set default Gemini model jika belum ada
-  if (!props.getProperty("GEMINI_MODEL")) {
-    props.setProperty("GEMINI_MODEL", "gemini-1.5-flash");
+  // Set default Gemini model jika belum ada atau perbarui ke latest
+  const currentModel = props.getProperty("GEMINI_MODEL");
+  if (!currentModel || currentModel === "gemini-1.5-flash" || currentModel === "gemini-1.5-flash-latest") {
+    props.setProperty("GEMINI_MODEL", "gemini-flash-latest");
   }
 
   // Setup Sheet RawData jika belum ada (Skema Dinamis: Modul 1..N dapat teregistrasi otomatis)
@@ -430,7 +431,7 @@ function getDashboardData() {
 function askGemini(userMsg, plantType) {
   const props = PropertiesService.getScriptProperties();
   const apiKey = props.getProperty("GEMINI_API_KEY");
-  const modelName = props.getProperty("GEMINI_MODEL") || "gemini-1.5-flash";
+  const modelName = props.getProperty("GEMINI_MODEL") || "gemini-flash-latest";
   const ssId = props.getProperty("SPREADSHEET_ID");
   
   if (!apiKey) {
