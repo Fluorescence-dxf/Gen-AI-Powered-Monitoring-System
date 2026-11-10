@@ -280,8 +280,8 @@ function processHorizontalData(sheet, dataRow) {
   if (modCols.wetCol > 0 && dataRow.wetTemp !== undefined && dataRow.wetTemp !== null) {
     sheet.getRange(targetRowIndex, modCols.wetCol).setValue(dataRow.wetTemp);
   }
-  if (modCols.rh > 0 && dataRow.rh !== undefined && dataRow.rh !== null) {
-    sheet.getRange(targetRowIndex, modCols.rh).setValue(dataRow.rh);
+  if (modCols.rhCol > 0 && dataRow.rh !== undefined && dataRow.rh !== null) {
+    sheet.getRange(targetRowIndex, modCols.rhCol).setValue(dataRow.rh);
   }
   if (modCols.luxCol > 0 && dataRow.lux !== undefined && dataRow.lux !== null) {
     sheet.getRange(targetRowIndex, modCols.luxCol).setValue(dataRow.lux);
