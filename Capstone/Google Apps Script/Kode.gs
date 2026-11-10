@@ -558,6 +558,21 @@ Batasan:
   }
 }
 
+/**
+ * Fungsi Pengujian Mandiri untuk Memverifikasi Koneksi API Gemini Flash Latest
+ * Jalankan fungsi ini dari dropdown Run di Google Apps Script editor.
+ */
+function testGeminiApi() {
+  Logger.log("Memulai pengujian Gemini API (gemini-flash-latest)...");
+  const testMsg = "Halo! Ini adalah tes konektivitas CAMP-AI. Berikan status ringkas kesiapan sistem.";
+  const result = askGemini(testMsg, "Melon Inthanon");
+  Logger.log("==================================================");
+  Logger.log("RESPONS DARI GEMINI FLASH LATEST:");
+  Logger.log(result);
+  Logger.log("==================================================");
+  return result;
+}
+
 // ============================================================================
 // 6. WEB APPLICATION HANDLER
 // ============================================================================
