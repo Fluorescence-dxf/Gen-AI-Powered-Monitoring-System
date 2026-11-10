@@ -428,10 +428,70 @@ function getDashboardData() {
 // ============================================================================
 // 5. ASISTEN AGRONOMI GEMINI AI (Generative Language API)
 // ============================================================================
+
+/**
+ * Mengambil daftar model AI aktif yang mendukung 'generateContent' secara dinamis dari Google AI
+ * Menyaring model yang benar-benar tersedia untuk API Key pengguna.
+ */
+function getAvailableGeminiModels(apiKey) {
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get("ACTIVE_GEMINI_MODELS");
+  if (cached) {
+    try { return JSON.parse(cached); } catch(e) {}
+  }
+
+  // Daftar fallback urutan prioritas jika ListModels tidak dapat diakses
+  const fallbackList = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-exp",
+    "gemini-1.5-flash-latest",
+    "gemini-1.5-flash-002",
+    "gemini-1.5-flash-001",
+    "gemini-1.5-flash-8b",
+    "gemini-flash-latest",
+    "gemini-pro"
+  ];
+
+  try {
+    const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
+    const res = UrlFetchApp.fetch(listUrl, {
+      method: "get",
+      muteHttpExceptions: true
+    });
+    
+    if (res.getResponseCode() === 200) {
+      const data = JSON.parse(res.getContentText());
+      if (data.models && Array.isArray(data.models)) {
+        // Ambil hanya model yang mendukung generateContent
+        const supported = data.models
+          .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes("generateContent"))
+          .map(m => m.name.replace(/^models\//, ""));
+        
+        // Urutkan model Flash di posisi paling atas karena paling cepat dan efisien
+        supported.sort((a, b) => {
+          const aFlash = a.toLowerCase().includes("flash") ? 1 : 0;
+          const bFlash = b.toLowerCase().includes("flash") ? 1 : 0;
+          return bFlash - aFlash;
+        });
+
+        if (supported.length > 0) {
+          cache.put("ACTIVE_GEMINI_MODELS", JSON.stringify(supported), 21600); // Simpan di cache selama 6 jam
+          return supported;
+        }
+      }
+    }
+  } catch(e) {
+    Logger.log("Gagal memanggil ModelService.ListModels: " + e.message);
+  }
+
+  return fallbackList;
+}
+
 function askGemini(userMsg, plantType) {
   const props = PropertiesService.getScriptProperties();
   const apiKey = props.getProperty("GEMINI_API_KEY");
-  const modelName = props.getProperty("GEMINI_MODEL") || "gemini-1.5-flash";
+  const configuredModel = (props.getProperty("GEMINI_MODEL") || "").trim();
   const ssId = props.getProperty("SPREADSHEET_ID");
   
   if (!apiKey) {
@@ -452,16 +512,14 @@ function askGemini(userMsg, plantType) {
   // 1. Simpan pesan user saat ini ke database obrolan
   chatSheet.appendRow([new Date(), "User", userMsg]);
 
-  // 2. Baca riwayat obrolan terdahulu (sebelum baris yang baru saja ditambahkan)
+  // 2. Baca riwayat obrolan terdahulu
   const allRows = chatSheet.getDataRange().getValues().slice(1);
   const priorRows = allRows.slice(0, -1).filter(c => {
     const role = c[1];
     const text = c[2];
-    // Hanya masukkan percakapan valid User atau AI, abaikan log error sistem
     return (role === "User" || role === "AI") && text && String(text).trim().length > 0;
   });
 
-  // Ambil maksimal 16 riwayat terakhir untuk efisiensi token & latensi cepat
   const recentHistory = priorRows.slice(-16);
 
   // 3. Susun histori dengan rotasi role yang valid (user <-> model)
@@ -469,7 +527,6 @@ function askGemini(userMsg, plantType) {
   let lastRole = null;
   for (let i = 0; i < recentHistory.length; i++) {
     const currentRole = (recentHistory[i][1] === "User") ? "user" : "model";
-    // Cegah dua peran identik berturut-turut yang ditolak oleh Gemini API
     if (currentRole !== lastRole) {
       contents.push({
         role: currentRole,
@@ -479,7 +536,6 @@ function askGemini(userMsg, plantType) {
     }
   }
 
-  // Jika pesan histori terakhir adalah 'user', hapus agar tidak bentrok dengan pesan saat ini
   if (contents.length > 0 && contents[contents.length - 1].role === "user") {
     contents.pop();
   }
@@ -514,10 +570,12 @@ Batasan:
     parts: [{ text: enrichedUserMsg }] 
   });
 
-  // 7. Request ke Gemini REST API dengan Multi-Model Failover (Mencegah Error 503 / High Demand)
-  // Urutan fallback otomatis jika Google AI mengalami lonjakan trafik pada satu model:
-  const candidateModels = [modelName];
-  ["gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-flash-latest"].forEach(m => {
+  // 7. Request ke Gemini REST API dengan Multi-Model Failover Otomatis
+  // Ambil daftar model aktif yang tersedia di akun Google AI pengguna secara real-time
+  const liveModels = getAvailableGeminiModels(apiKey);
+  const candidateModels = [];
+  if (configuredModel) candidateModels.push(configuredModel);
+  liveModels.forEach(m => {
     if (!candidateModels.includes(m)) candidateModels.push(m);
   });
 
@@ -540,7 +598,7 @@ Batasan:
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${apiKey}`;
 
     try {
-      Logger.log(`[Gemini API] Mengirim request ke model: ${targetModel} (Percobaan ${i + 1}/${candidateModels.length})...`);
+      Logger.log(`[Gemini API] Mengirim request ke model: ${targetModel} (Kandidat ${i + 1}/${candidateModels.length})...`);
       
       const res = UrlFetchApp.fetch(endpoint, {
         method: "post", 
@@ -560,42 +618,67 @@ Batasan:
           const aiReply = responseData.candidates[0].content.parts[0].text;
           chatSheet.appendRow([new Date(), "AI", aiReply]);
           if (i > 0) {
-            Logger.log(`[Failover Sukses] Berhasil menggunakan model alternatif: ${targetModel}`);
+            Logger.log(`[Failover Sukses] Model '${targetModel}' berhasil menjawab setelah model sebelumnya tidak tersedia.`);
           }
           return aiReply;
         }
-      } else if (responseCode === 503 || responseCode === 429) {
-        // HTTP 503: Model High Demand (Server Google sedang sibuk) atau 429: Rate limit
-        Logger.log(`[Gemini Warning] Model ${targetModel} sibuk (HTTP ${responseCode}: High Demand). Beralih ke model cadangan berikutnya...`);
-        Utilities.sleep(1000); // Tunggu 1 detik sebelum fallback ke model lain
+      } else if (responseCode === 503 || responseCode === 429 || responseCode === 404) {
+        // 503: High Demand (Server Sibuk), 429: Rate Limit, 404: Model Not Found pada versi API ini
+        Logger.log(`[Gemini Warning] Model '${targetModel}' tidak dapat digunakan saat ini (HTTP ${responseCode}). Otomatis beralih ke model berikutnya...`);
+        Utilities.sleep(500); // Jeda singkat 500ms sebelum mencoba model cadangan
         continue;
       } else {
-        // Error fatal selain 503 (misal HTTP 400 invalid argument atau 403 API key salah)
-        Logger.log(`[Gemini Error] Model ${targetModel} gagal (HTTP ${responseCode}): ${responseText}`);
+        // Error otentikasi fatal (misal HTTP 400 Invalid Argument atau HTTP 403 API Key salah)
+        Logger.log(`[Gemini Fatal Error] Model '${targetModel}' gagal (HTTP ${responseCode}): ${responseText}`);
         break;
       }
     } catch (e) {
-      Logger.log(`[Gemini Exception] Error pada model ${targetModel}: ${e.message}`);
+      Logger.log(`[Gemini Exception] Error pada model '${targetModel}': ${e.message}`);
     }
   }
 
   // Jika seluruh model cadangan mengalami kendala:
   chatSheet.appendRow([new Date(), "SYSTEM_ERROR", `HTTP ${lastErrorCode}: ${lastErrorText}`]);
-  Logger.log(`[Gemini Fatal] Seluruh model AI gagal dipanggil. Terakhir: HTTP ${lastErrorCode}`);
+  Logger.log(`[Gemini Fatal] Seluruh kandidat model AI gagal dipanggil. Terakhir: HTTP ${lastErrorCode} - ${lastErrorText}`);
 
-  return "Mohon maaf, server Google AI saat ini sedang mengalami lonjakan beban trafik (High Demand). Silakan coba kirim kembali pesan Anda dalam beberapa saat.";
+  return "Mohon maaf, layanan Google AI saat ini sedang mengalami lonjakan beban trafik (High Demand). Silakan coba kembali dalam beberapa saat.";
 }
 
 /**
- * Fungsi Pengujian Mandiri untuk Memverifikasi Koneksi API Gemini Flash Latest
+ * Fungsi Diagnostik untuk Memeriksa Semua Model yang Aktif & Didukung pada Kunci API Anda
+ * Jalankan fungsi ini dari dropdown Run di editor Google Apps Script.
+ */
+function checkAvailableModels() {
+  const props = PropertiesService.getScriptProperties();
+  const apiKey = props.getProperty("GEMINI_API_KEY");
+  if (!apiKey) {
+    Logger.log("⚠️ API Key belum disetel di Script Properties (GEMINI_API_KEY)!");
+    return;
+  }
+  
+  Logger.log("Memeriksa daftar model yang aktif dan didukung langsung dari Google AI API...");
+  // Hapus cache agar mendapatkan data segar langsung dari Google
+  CacheService.getScriptCache().remove("ACTIVE_GEMINI_MODELS");
+  
+  const models = getAvailableGeminiModels(apiKey);
+  Logger.log("==================================================");
+  Logger.log(`DITEMUKAN ${models.length} MODEL YANG AKTIF & MENDUKUNG generateContent:`);
+  models.forEach((m, idx) => {
+    Logger.log(` ${idx + 1}. ${m}`);
+  });
+  Logger.log("==================================================");
+}
+
+/**
+ * Fungsi Pengujian Mandiri untuk Memverifikasi Koneksi API Gemini dengan Auto-Failover
  * Jalankan fungsi ini dari dropdown Run di Google Apps Script editor.
  */
 function testGeminiApi() {
-  Logger.log("Memulai pengujian Gemini API (gemini-flash-latest)...");
+  Logger.log("Memulai pengujian Gemini API (dengan Auto-Failover Dinamis)...");
   const testMsg = "Halo! Ini adalah tes konektivitas CAMP-AI. Berikan status ringkas kesiapan sistem.";
   const result = askGemini(testMsg, "Melon Inthanon");
   Logger.log("==================================================");
-  Logger.log("RESPONS DARI GEMINI FLASH LATEST:");
+  Logger.log("RESPONS DARI GEMINI AI:");
   Logger.log(result);
   Logger.log("==================================================");
   return result;
