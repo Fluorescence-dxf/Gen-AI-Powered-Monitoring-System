@@ -47,10 +47,10 @@ function setup() {
     props.setProperty("SPREADSHEET_ID", ss.getId());
   }
 
-  // Set default Gemini model jika belum ada atau perbarui ke latest
+  // Set default Gemini model jika belum ada (gunakan gemini-1.5-flash yang memiliki kuota kapasitas stabil)
   const currentModel = props.getProperty("GEMINI_MODEL");
-  if (!currentModel || currentModel === "gemini-1.5-flash" || currentModel === "gemini-1.5-flash-latest") {
-    props.setProperty("GEMINI_MODEL", "gemini-flash-latest");
+  if (!currentModel) {
+    props.setProperty("GEMINI_MODEL", "gemini-1.5-flash");
   }
 
   // Setup Sheet RawData jika belum ada (Skema Dinamis: Modul 1..N dapat teregistrasi otomatis)
@@ -431,7 +431,7 @@ function getDashboardData() {
 function askGemini(userMsg, plantType) {
   const props = PropertiesService.getScriptProperties();
   const apiKey = props.getProperty("GEMINI_API_KEY");
-  const modelName = props.getProperty("GEMINI_MODEL") || "gemini-flash-latest";
+  const modelName = props.getProperty("GEMINI_MODEL") || "gemini-1.5-flash";
   const ssId = props.getProperty("SPREADSHEET_ID");
   
   if (!apiKey) {
@@ -514,48 +514,76 @@ Batasan:
     parts: [{ text: enrichedUserMsg }] 
   });
 
-  // 7. Request ke Gemini REST API
-  try {
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-    const payload = {
-      system_instruction: { 
-        parts: [{ text: systemPrompt }] 
-      },
-      contents: contents,
-      generationConfig: {
-        temperature: 0.7,
-        maxOutputTokens: 800
-      }
-    };
+  // 7. Request ke Gemini REST API dengan Multi-Model Failover (Mencegah Error 503 / High Demand)
+  // Urutan fallback otomatis jika Google AI mengalami lonjakan trafik pada satu model:
+  const candidateModels = [modelName];
+  ["gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-flash-latest"].forEach(m => {
+    if (!candidateModels.includes(m)) candidateModels.push(m);
+  });
 
-    const res = UrlFetchApp.fetch(endpoint, {
-      method: "post", 
-      contentType: "application/json", 
-      muteHttpExceptions: true, 
-      payload: JSON.stringify(payload)
-    });
-    
-    const responseCode = res.getResponseCode();
-    const responseData = JSON.parse(res.getContentText());
-
-    if (responseCode === 200 && responseData.candidates && responseData.candidates.length > 0) {
-      const aiReply = responseData.candidates[0].content.parts[0].text;
-      chatSheet.appendRow([new Date(), "AI", aiReply]);
-      return aiReply;
-    } else {
-      // Catat raw error ke chatSheet untuk kebutuhan audit
-      const rawError = res.getContentText();
-      chatSheet.appendRow([new Date(), "SYSTEM_ERROR", rawError]);
-      Logger.log("Gemini API Error (" + responseCode + "): " + rawError);
-
-      return "Mohon maaf, sistem AI CAMP-AI saat ini sedang mengalami kendala komunikasi dengan layanan pemrosesan bahasa alami. Silakan coba kembali beberapa saat lagi.";
+  const payload = {
+    system_instruction: { 
+      parts: [{ text: systemPrompt }] 
+    },
+    contents: contents,
+    generationConfig: {
+      temperature: 0.7,
+      maxOutputTokens: 800
     }
-  } catch (e) {
-    chatSheet.appendRow([new Date(), "SYSTEM_CRASH", e.message]);
-    Logger.log("Exception in askGemini: " + e.message);
+  };
 
-    return "Terjadi kendala pada server saat memproses jawaban AI (" + e.message + "). Silakan muat ulang halaman atau coba beberapa saat lagi.";
+  let lastErrorText = "";
+  let lastErrorCode = 0;
+
+  for (let i = 0; i < candidateModels.length; i++) {
+    const targetModel = candidateModels[i];
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${apiKey}`;
+
+    try {
+      Logger.log(`[Gemini API] Mengirim request ke model: ${targetModel} (Percobaan ${i + 1}/${candidateModels.length})...`);
+      
+      const res = UrlFetchApp.fetch(endpoint, {
+        method: "post", 
+        contentType: "application/json", 
+        muteHttpExceptions: true, 
+        payload: JSON.stringify(payload)
+      });
+      
+      const responseCode = res.getResponseCode();
+      const responseText = res.getContentText();
+      lastErrorCode = responseCode;
+      lastErrorText = responseText;
+
+      if (responseCode === 200) {
+        const responseData = JSON.parse(responseText);
+        if (responseData.candidates && responseData.candidates.length > 0) {
+          const aiReply = responseData.candidates[0].content.parts[0].text;
+          chatSheet.appendRow([new Date(), "AI", aiReply]);
+          if (i > 0) {
+            Logger.log(`[Failover Sukses] Berhasil menggunakan model alternatif: ${targetModel}`);
+          }
+          return aiReply;
+        }
+      } else if (responseCode === 503 || responseCode === 429) {
+        // HTTP 503: Model High Demand (Server Google sedang sibuk) atau 429: Rate limit
+        Logger.log(`[Gemini Warning] Model ${targetModel} sibuk (HTTP ${responseCode}: High Demand). Beralih ke model cadangan berikutnya...`);
+        Utilities.sleep(1000); // Tunggu 1 detik sebelum fallback ke model lain
+        continue;
+      } else {
+        // Error fatal selain 503 (misal HTTP 400 invalid argument atau 403 API key salah)
+        Logger.log(`[Gemini Error] Model ${targetModel} gagal (HTTP ${responseCode}): ${responseText}`);
+        break;
+      }
+    } catch (e) {
+      Logger.log(`[Gemini Exception] Error pada model ${targetModel}: ${e.message}`);
+    }
   }
+
+  // Jika seluruh model cadangan mengalami kendala:
+  chatSheet.appendRow([new Date(), "SYSTEM_ERROR", `HTTP ${lastErrorCode}: ${lastErrorText}`]);
+  Logger.log(`[Gemini Fatal] Seluruh model AI gagal dipanggil. Terakhir: HTTP ${lastErrorCode}`);
+
+  return "Mohon maaf, server Google AI saat ini sedang mengalami lonjakan beban trafik (High Demand). Silakan coba kirim kembali pesan Anda dalam beberapa saat.";
 }
 
 /**
