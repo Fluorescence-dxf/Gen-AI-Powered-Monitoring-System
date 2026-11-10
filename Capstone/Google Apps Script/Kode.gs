@@ -49,20 +49,18 @@ function setup() {
 
   // Set default Gemini model jika belum ada
   if (!props.getProperty("GEMINI_MODEL")) {
-    props.setProperty("GEMINI_MODEL", "gemini-flash-latest");
+    props.setProperty("GEMINI_MODEL", "gemini-1.5-flash");
   }
 
-  // Setup Sheet RawData jika belum ada
+  // Setup Sheet RawData jika belum ada (Skema Dinamis: Modul 1..N dapat teregistrasi otomatis)
   if (!ss.getSheetByName(CONFIG.SHEET_RAW)) {
     const sheet = ss.insertSheet(CONFIG.SHEET_RAW);
-    sheet.appendRow(["Module1", "", "", "", "Module2", "", "", "Module3", "", "", "Timestamp", "Average", "", ""]);
-    sheet.appendRow(["Lux", "DryTemp1", "WetTemp1", "RH1", "DryTemp2", "WetTemp2", "RH2", "DryTemp3", "WetTemp3", "RH3", "Timestamp", "DryTemp", "WetTemp", "RH"]);
+    sheet.appendRow(["Module1", "", "", "", "Timestamp", "Average", "", "", ""]);
+    sheet.appendRow(["Lux", "DryTemp1", "WetTemp1", "RH1", "Timestamp", "DryTemp", "WetTemp", "RH", "Lux"]);
     
     sheet.getRange("A1:D1").mergeAcross();
-    sheet.getRange("E1:G1").mergeAcross();
-    sheet.getRange("H1:J1").mergeAcross();
-    sheet.getRange("L1:N1").mergeAcross();
-    sheet.getRange("A1:N2").setHorizontalAlignment("center").setFontWeight("bold").setBackground("#FF9900");
+    sheet.getRange("F1:I1").mergeAcross();
+    sheet.getRange("A1:I2").setHorizontalAlignment("center").setFontWeight("bold").setBackground("#FF9900");
     sheet.setFrozenRows(2);
   }
   
@@ -87,11 +85,132 @@ function setup() {
 }
 
 // ============================================================================
-// 2. INGESTION DATA & LOGIKA PENGELOMPOKAN HORIZONTAL (ESP32 -> GAS)
+// 2. REGISTRI KOLOM & SKALABILITAS DINAMIS MULTI-MODUL (1 s.d. N Modul)
+// ============================================================================
+
+/**
+ * Memetakan seluruh kolom sheet RawData secara dinamis berdasarkan baris header
+ * Mendukung skema legacy (14 kolom) maupun penambahan kolom modul tak terbatas (N-modul).
+ */
+function getHeaderMap(sheet) {
+  const lastCol = Math.max(sheet.getLastColumn(), 14);
+  const r1 = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const r2 = sheet.getRange(2, 1, 1, lastCol).getValues()[0];
+  
+  const map = {
+    timestampCol: -1,
+    avgCols: { dry: -1, wet: -1, rh: -1, lux: -1 },
+    modules: {}, // moduleId -> { dryCol, wetCol, rhCol, luxCol }
+    lastCol: sheet.getLastColumn()
+  };
+  
+  // 1. Temukan kolom Timestamp
+  for (let c = 0; c < lastCol; c++) {
+    const h2 = String(r2[c] || "").trim().toLowerCase();
+    const h1 = String(r1[c] || "").trim().toLowerCase();
+    if (h2 === "timestamp" || h1 === "timestamp") {
+      map.timestampCol = c + 1; // 1-indexed
+      break;
+    }
+  }
+  if (map.timestampCol === -1) map.timestampCol = 11; // Fallback legacy Col K
+  
+  // 2. Temukan kolom Rata-rata Spasial (Average)
+  let inAverageSection = false;
+  for (let c = 0; c < lastCol; c++) {
+    const h1 = String(r1[c] || "").trim().toLowerCase();
+    const h2 = String(r2[c] || "").trim().toLowerCase();
+    if (h1.includes("average") || h1.includes("avg") || h1.includes("rata")) {
+      inAverageSection = true;
+    }
+    if (inAverageSection || c + 1 > map.timestampCol) {
+      if (h2.includes("dry")) map.avgCols.dry = c + 1;
+      else if (h2.includes("wet")) map.avgCols.wet = c + 1;
+      else if (h2.includes("rh")) map.avgCols.rh = c + 1;
+      else if (h2.includes("lux")) map.avgCols.lux = c + 1;
+    }
+  }
+  // Fallback nilai default average jika belum terpetakan
+  if (map.avgCols.dry === -1) map.avgCols.dry = 12;
+  if (map.avgCols.wet === -1) map.avgCols.wet = 13;
+  if (map.avgCols.rh === -1) map.avgCols.rh = 14;
+
+  // 3. Petakan modul-modul yang terdaftar di sheet
+  let currentModule = "";
+  for (let c = 0; c < lastCol; c++) {
+    const colIndex = c + 1;
+    if (colIndex === map.timestampCol || 
+        colIndex === map.avgCols.dry || 
+        colIndex === map.avgCols.wet || 
+        colIndex === map.avgCols.rh || 
+        colIndex === map.avgCols.lux) {
+      continue;
+    }
+
+    const h1 = String(r1[c] || "").trim();
+    if (h1 && !h1.toLowerCase().includes("average") && !h1.toLowerCase().includes("timestamp")) {
+      currentModule = h1;
+    }
+
+    const h2 = String(r2[c] || "").trim();
+    let modKey = currentModule;
+    if (!modKey) {
+      const match = h2.match(/(Module\d+|Node\w+)/i);
+      if (match) modKey = match[1];
+    }
+    // Fallback kompatibilitas sheet legacy 3-modul
+    if (!modKey) {
+      if (colIndex >= 1 && colIndex <= 4) modKey = "Module1";
+      else if (colIndex >= 5 && colIndex <= 7) modKey = "Module2";
+      else if (colIndex >= 8 && colIndex <= 10) modKey = "Module3";
+    }
+
+    if (modKey) {
+      if (!map.modules[modKey]) {
+        map.modules[modKey] = { dryCol: -1, wetCol: -1, rhCol: -1, luxCol: -1 };
+      }
+      const h2Lower = h2.toLowerCase();
+      if (h2Lower.includes("dry")) map.modules[modKey].dryCol = colIndex;
+      else if (h2Lower.includes("wet")) map.modules[modKey].wetCol = colIndex;
+      else if (h2Lower.includes("rh")) map.modules[modKey].rhCol = colIndex;
+      else if (h2Lower.includes("lux")) map.modules[modKey].luxCol = colIndex;
+    }
+  }
+
+  return map;
+}
+
+/**
+ * Mendaftarkan modul baru secara dinamis ke header sheet tanpa merusak kolom yang ada
+ */
+function ensureModuleColumns(sheet, headerMap, moduleId) {
+  if (headerMap.modules[moduleId]) {
+    return headerMap.modules[moduleId];
+  }
+
+  // Modul baru terdeteksi: Sisipkan 4 kolom tepat sebelum Timestamp
+  const insertPos = headerMap.timestampCol;
+  sheet.insertColumnsBefore(insertPos, 4);
+
+  // Set Header Baris 1: Nama Modul di-merge across 4 kolom
+  sheet.getRange(1, insertPos, 1, 4).mergeAcross().setValue(moduleId)
+    .setHorizontalAlignment("center").setFontWeight("bold").setBackground("#FF9900");
+
+  // Set Header Baris 2: Sub-parameter
+  sheet.getRange(2, insertPos, 1, 4).setValues([["Lux", moduleId + "_DryTemp", moduleId + "_WetTemp", moduleId + "_RH"]])
+    .setHorizontalAlignment("center").setFontWeight("bold").setBackground("#FF9900");
+
+  // Muat ulang header map setelah kolom baru terbentuk
+  return getHeaderMap(sheet).modules[moduleId];
+}
+
+// ============================================================================
+// 3. INGESTION DATA & LOGIKA PENGELOMPOKAN HORIZONTAL (ESP32 -> GAS)
 // ============================================================================
 function doPost(e) {
+  // Gunakan batas maksimal LockService (30 detik) untuk menangani lonjakan konkurensi N node
   const lock = LockService.getScriptLock();
-  if (!lock.tryLock(15000)) {
+  if (!lock.tryLock(30000)) {
     return ContentService.createTextOutput("Error: Server Busy").setMimeType(ContentService.MimeType.TEXT);
   }
 
@@ -119,25 +238,25 @@ function doPost(e) {
 
 /**
  * Menempatkan data modul ke baris yang sama bila berada dalam jendela waktu 3 menit
+ * Mendukung sembarang Module ID secara dinamis tanpa hardcode.
  */
 function processHorizontalData(sheet, dataRow) {
   const now = new Date();
+  let headerMap = getHeaderMap(sheet);
   
-  // Cari baris terakhir berdasarkan kolom Timestamp (Kolom K / 11)
-  const timestamps = sheet.getRange("K:K").getValues();
-  let lastRow = 0;
-  for (let i = timestamps.length - 1; i >= 0; i--) {
-    if (timestamps[i][0] !== "") {
-      lastRow = i + 1;
-      break;
-    }
+  // 1. Registrasi modul jika ID modul belum terdaftar di kolom sheet
+  let modCols = headerMap.modules[dataRow.module];
+  if (!modCols) {
+    modCols = ensureModuleColumns(sheet, headerMap, dataRow.module);
+    headerMap = getHeaderMap(sheet); // Segarkan peta kolom setelah pergeseran
   }
 
+  // 2. Cari baris target secara instan via getLastRow() tanpa full-column scan K:K
+  const lastRow = sheet.getLastRow();
   let targetRowIndex = -1;
   
-  // Jika baris terakhir bukan header, periksa selisih waktu
   if (lastRow > 2) {
-    const lastTimestamp = sheet.getRange(lastRow, 11).getValue();
+    const lastTimestamp = sheet.getRange(lastRow, headerMap.timestampCol).getValue();
     if (lastTimestamp instanceof Date) {
       const diffMs = now.getTime() - lastTimestamp.getTime();
       // Gabungkan modul ke baris yang sama bila selisih waktu < 3 menit
@@ -147,60 +266,78 @@ function processHorizontalData(sheet, dataRow) {
     }
   }
   
-  // Jika di luar jendela waktu agregasi, buat baris baru
+  // 3. Jika di luar jendela agregasi, alokasikan baris baru
   if (targetRowIndex === -1) {
-    targetRowIndex = lastRow + 1;
-    sheet.getRange(targetRowIndex, 11).setValue(now); 
+    targetRowIndex = Math.max(lastRow + 1, 3);
+    sheet.getRange(targetRowIndex, headerMap.timestampCol).setValue(now); 
   }
   
-  // Masukkan data modul ke kolom masing-masing
-  if (dataRow.module === "Module1") {
-    sheet.getRange(targetRowIndex, 1, 1, 4).setValues([
-      [dataRow.lux !== null ? dataRow.lux : 0, dataRow.dryTemp, dataRow.wetTemp, dataRow.rh]
-    ]);
-  } else if (dataRow.module === "Module2") {
-    sheet.getRange(targetRowIndex, 5, 1, 3).setValues([
-      [dataRow.dryTemp, dataRow.wetTemp, dataRow.rh]
-    ]);
-  } else if (dataRow.module === "Module3") {
-    sheet.getRange(targetRowIndex, 8, 1, 3).setValues([
-      [dataRow.dryTemp, dataRow.wetTemp, dataRow.rh]
-    ]);
+  // 4. Masukkan data sensor ke kolom modul yang telah dipetakan
+  if (modCols.dryCol > 0 && dataRow.dryTemp !== undefined && dataRow.dryTemp !== null) {
+    sheet.getRange(targetRowIndex, modCols.dryCol).setValue(dataRow.dryTemp);
+  }
+  if (modCols.wetCol > 0 && dataRow.wetTemp !== undefined && dataRow.wetTemp !== null) {
+    sheet.getRange(targetRowIndex, modCols.wetCol).setValue(dataRow.wetTemp);
+  }
+  if (modCols.rh > 0 && dataRow.rh !== undefined && dataRow.rh !== null) {
+    sheet.getRange(targetRowIndex, modCols.rh).setValue(dataRow.rh);
+  }
+  if (modCols.luxCol > 0 && dataRow.lux !== undefined && dataRow.lux !== null) {
+    sheet.getRange(targetRowIndex, modCols.luxCol).setValue(dataRow.lux);
   }
   
-  // Hitung rata-rata spasial greenhouse secara otomatis di kolom L, M, N
-  updateAverages(sheet, targetRowIndex);
+  // 5. Perbarui rata-rata spasial greenhouse secara dinamis lintas seluruh modul aktif
+  updateAverages(sheet, headerMap, targetRowIndex);
   
-  // Periksa ambang batas anomali dan kirim notifikasi jika diperlukan
+  // 6. Evaluasi ambang batas anomali mikroklimat
   checkAnomaly(dataRow);
 }
 
 /**
- * Menghitung rata-rata spasial parameter lingkungan di greenhouse
+ * Menghitung rata-rata spasial secara dinamis untuk seluruh modul yang terdaftar
  */
-function updateAverages(sheet, rowIdx) {
-  const rowData = sheet.getRange(rowIdx, 1, 1, 10).getValues()[0];
-  const calc = (indices) => {
-    let sum = 0, count = 0;
-    indices.forEach(i => {
-      let val = parseFloat(rowData[i]);
-      if (!isNaN(val) && val !== 0) { 
-        sum += val; 
-        count++; 
-      }
-    });
-    return count > 0 ? (sum / count).toFixed(1) : "";
-  };
+function updateAverages(sheet, headerMap, rowIdx) {
+  const lastCol = sheet.getLastColumn();
+  const rowVals = sheet.getRange(rowIdx, 1, 1, lastCol).getValues()[0];
   
-  const avgDry = calc([1, 4, 7]); // DryTemp Modul 1, 2, 3
-  const avgWet = calc([2, 5, 8]); // WetTemp Modul 1, 2, 3
-  const avgRh  = calc([3, 6, 9]); // RH Modul 1, 2, 3
+  let sumDry = 0, countDry = 0;
+  let sumWet = 0, countWet = 0;
+  let sumRh = 0, countRh = 0;
+  let sumLux = 0, countLux = 0;
   
-  sheet.getRange(rowIdx, 12, 1, 3).setValues([[avgDry, avgWet, avgRh]]);
+  Object.keys(headerMap.modules).forEach(modId => {
+    const m = headerMap.modules[modId];
+    if (m.dryCol > 0) {
+      const val = parseFloat(rowVals[m.dryCol - 1]);
+      if (!isNaN(val) && val !== 0) { sumDry += val; countDry++; }
+    }
+    if (m.wetCol > 0) {
+      const val = parseFloat(rowVals[m.wetCol - 1]);
+      if (!isNaN(val) && val !== 0) { sumWet += val; countWet++; }
+    }
+    if (m.rhCol > 0) {
+      const val = parseFloat(rowVals[m.rhCol - 1]);
+      if (!isNaN(val) && val !== 0) { sumRh += val; countRh++; }
+    }
+    if (m.luxCol > 0) {
+      const val = parseFloat(rowVals[m.luxCol - 1]);
+      if (!isNaN(val) && val > 0) { sumLux += val; countLux++; }
+    }
+  });
+  
+  const avgDry = countDry > 0 ? (sumDry / countDry).toFixed(1) : "";
+  const avgWet = countWet > 0 ? (sumWet / countWet).toFixed(1) : "";
+  const avgRh  = countRh  > 0 ? (sumRh  / countRh).toFixed(1)  : "";
+  const avgLux = countLux > 0 ? (sumLux / countLux).toFixed(0) : "";
+  
+  if (headerMap.avgCols.dry > 0) sheet.getRange(rowIdx, headerMap.avgCols.dry).setValue(avgDry);
+  if (headerMap.avgCols.wet > 0) sheet.getRange(rowIdx, headerMap.avgCols.wet).setValue(avgWet);
+  if (headerMap.avgCols.rh > 0)  sheet.getRange(rowIdx, headerMap.avgCols.rh).setValue(avgRh);
+  if (headerMap.avgCols.lux > 0 && avgLux !== "") sheet.getRange(rowIdx, headerMap.avgCols.lux).setValue(avgLux);
 }
 
 // ============================================================================
-// 3. DETEKSI ANOMALI & NOTIFIKASI EMAIL
+// 4. DETEKSI ANOMALI & NOTIFIKASI EMAIL
 // ============================================================================
 function checkAnomaly(dataRow) {
   const props = PropertiesService.getScriptProperties();
@@ -233,7 +370,7 @@ function checkAnomaly(dataRow) {
 }
 
 // ============================================================================
-// 4. DATA PROVIDER UNTUK DASHBOARD UI
+// 5. DATA PROVIDER UNTUK DASHBOARD UI (Dinamis N-Modul)
 // ============================================================================
 function getDashboardData() {
   const props = PropertiesService.getScriptProperties();
@@ -246,24 +383,43 @@ function getDashboardData() {
   
   if (rows.length <= 2) return { latest: null, status: "No Data" };
   
+  const headerMap = getHeaderMap(sheet);
+  const tsIdx = headerMap.timestampCol - 1;
+  const dryIdx = headerMap.avgCols.dry - 1;
+  const wetIdx = headerMap.avgCols.wet - 1;
+  const rhIdx = headerMap.avgCols.rh - 1;
+  
+  // Dapatkan nilai lux rata-rata atau dari modul pertama yang memiliki sensor lux
+  let luxIdx = headerMap.avgCols.lux > 0 ? (headerMap.avgCols.lux - 1) : -1;
+  if (luxIdx === -1) {
+    for (const m of Object.values(headerMap.modules)) {
+      if (m.luxCol > 0) { luxIdx = m.luxCol - 1; break; }
+    }
+  }
+  if (luxIdx === -1) luxIdx = 0; // Fallback legacy
+  
   const recentData = rows.slice(2).slice(-12);
   const latest = recentData[recentData.length - 1];
   const safeDate = (dateObj) => (dateObj instanceof Date) ? dateObj.toISOString() : String(dateObj);
   
+  const activeModules = Object.keys(headerMap.modules);
+  
   return {
+    moduleCount: activeModules.length,
+    activeModules: activeModules,
     latest: {
-      timestamp: safeDate(latest[10]), 
-      lux: latest[0] || 0, 
-      dry: latest[11] || 0, 
-      wet: latest[12] || 0, 
-      rh: latest[13] || 0 
+      timestamp: safeDate(latest[tsIdx]), 
+      lux: (luxIdx >= 0 ? latest[luxIdx] : 0) || 0, 
+      dry: (dryIdx >= 0 ? latest[dryIdx] : 0) || 0, 
+      wet: (wetIdx >= 0 ? latest[wetIdx] : 0) || 0, 
+      rh: (rhIdx >= 0 ? latest[rhIdx] : 0) || 0 
     },
     trend: recentData.map(r => ({ 
-      ts: safeDate(r[10]),             
-      lux: r[0] || 0, 
-      dry: r[11] || 0, 
-      wet: r[12] || 0, 
-      rh: r[13] || 0 
+      ts: safeDate(r[tsIdx]),             
+      lux: (luxIdx >= 0 ? r[luxIdx] : 0) || 0, 
+      dry: (dryIdx >= 0 ? r[dryIdx] : 0) || 0, 
+      wet: (wetIdx >= 0 ? r[wetIdx] : 0) || 0, 
+      rh: (rhIdx >= 0 ? r[rhIdx] : 0) || 0 
     }))
   };
 }

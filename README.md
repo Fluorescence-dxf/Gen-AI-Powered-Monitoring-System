@@ -10,7 +10,7 @@
 [![Major](https://img.shields.io/badge/Major-Mechanical%20%26%20Biosystem%20Engineering-green.svg)](https://tmb.ipb.ac.id/)
 [![Hardware](https://img.shields.io/badge/Hardware-ESP32%20%7C%20DS18B20%20%7C%20BH1750-blue.svg)](Capstone/Firmware/Capstone.ino)
 [![Backend](https://img.shields.io/badge/Backend-Google%20Apps%20Script%20(Serverless)-darkgreen.svg)](Capstone/Google%20Apps%20Script/Kode.gs)
-[![AI Agent](https://img.shields.io/badge/AI-Google%20Gemini%20Flash%20Latest-orange.svg)](Capstone/Google%20Apps%20Script/Kode.gs)
+[![AI Agent](https://img.shields.io/badge/AI-Google%20Gemini%201.5%20Flash-orange.svg)](Capstone/Google%20Apps%20Script/Kode.gs)
 [![License: MIT](https://img.shields.io/badge/License-MIT-lightgrey.svg)](LICENSE)
 [![GitHub repo size](https://img.shields.io/github/repo-size/Fluorescence-dxf/Gen-AI-Powered-Monitoring-System)](https://github.com/Fluorescence-dxf/Gen-AI-Powered-Monitoring-System)
 
@@ -101,7 +101,7 @@ flowchart LR
 ┌────────────────────────────────────────────────────────────────────────┐
 │                        COMPETENCY ARCHITECTURE                         │
 ├──────────────────────────┬─────────────────────────────────────────────┤
-│ 1. Hardware & Embedded   │ • ESP32-WROOM Microcontroller Architecture  │
+│ 1. Hardware & Embedded   │ • ESP32-WROOM-32 Microcontroller Architecture│
 │                          │ • Bus Protocol: OneWire (DS18B20) & I2C     │
 │                          │ • Sensor: Dual DS18B20 Stainless, BH1750 Lux│
 │                          │ • Actuators: DC Blower Fan 5V Relay Control │
@@ -192,8 +192,7 @@ flowchart LR
 
 - **Institusi:** Departemen Teknik Mesin dan Biosistem, Fakultas Teknologi Pertanian, Institut Pertanian Bogor (IPB University)
 - **Kampus:** IPB Dramaga, Bogor, Jawa Barat 16680, Indonesia
-- **Surel:** `rafiyandipasha@outlook.com`
-- **Surel Akademik:** `rafiyandipasha@apps.ipb.ac.id`
+- **Surel Akademik:** `rafiyandi@apps.ipb.ac.id`
 
 ---
 

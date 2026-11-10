@@ -13,11 +13,10 @@
 #define SCRIPT_URL "https://script.google.com/macros/s/AKfycb.../exec"
 
 // Module Configuration:
-// Module 1 (Depan):   MODULE_ID = "Module1", HAS_LUX = true
-// Module 2 (Tengah):  MODULE_ID = "Module2", HAS_LUX = false
-// Module 3 (Belakang): MODULE_ID = "Module3", HAS_LUX = false
-#define MODULE_ID "Module1"
-#define HAS_LUX_SENSOR true
+// Atur MODULE_ID ke nama modul spesifik (misal "Module1", "Module4", "Greenhouse_North")
+// atau gunakan "AUTO" agar ID unik dibuat secara otomatis dari MAC address ESP32.
+// Catatan: Sensor lux (BH1750) kini terdeteksi otomatis pada bus I2C (tidak perlu flag manual).
+#define MODULE_ID_CONFIG "AUTO"
 
 // ESP32 GPIO Pin Assignments
 #define DRY_BULB_PIN 19   // DS18B20 Suhu Bola Kering

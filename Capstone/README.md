@@ -247,16 +247,16 @@ Berkas model 3D siap cetak (*Stereolithography* / STL) tersedia pada direktori [
 
 CAMP-AI memanfaatkan **Google Apps Script (GAS)** sebagai backend serverless tanpa biaya hosting langganan (*Zero Cloud Server Cost*), yang terintegrasi langsung dengan **Google Sheets** sebagai database relasional sederhana.
 
-### 1. Ingestion Data Horisontal 3 Node (`doPost`)
-Ketika ketiga node (Module 1, Module 2, Module 3) mengirimkan data ke endpoint GAS, data tidak ditumpuk menjadi baris-baris terpisah. Algoritma `processHorizontalData()` mengelompokkan data yang tiba dalam **jendela waktu 3 menit (180.000 ms)** ke dalam baris yang sama:
+### 1. Ingestion Data Horisontal Dinamis Multi-Node (1 s.d. N Node) (`doPost`)
+Ketika node-node (Module 1 s.d. Module N) mengirimkan data ke endpoint GAS, data tidak ditumpuk menjadi baris-baris terpisah. Algoritma `processHorizontalData()` bersama `ensureModuleColumns()` secara otomatis meregistrasi modul baru dan mengelompokkan data yang tiba dalam **jendela waktu 3 menit (180.000 ms)** ke dalam baris yang sama:
 
-| Kolom A–D | Kolom E–G | Kolom H–J | Kolom K | Kolom L–N |
-| :--- | :--- | :--- | :--- | :--- |
-| **Module 1 (Depan)** | **Module 2 (Tengah)** | **Module 3 (Belakang)** | **Timestamp** | **Spatial Average** |
-| Lux, Dry1, Wet1, RH1 | Dry2, Wet2, RH2 | Dry3, Wet3, RH3 | Waktu Sinkron | Avg Dry, Avg Wet, Avg RH |
+| Kolom Dinamis (1 s.d. N) | Kolom Timestamp | Kolom Average |
+| :--- | :--- | :--- |
+| **Module 1 ... Module N** | **Timestamp** | **Spatial Average** |
+| [Modul_N]_Lux, Dry, Wet, RH | Waktu Sinkronisasi | Avg Dry, Avg Wet, Avg RH, Avg Lux |
 
-### 2. Mekanisme Concurrency Lock
-Untuk mencegah *race condition* saat dua modul mengirim data pada detik yang sama, GAS menerapkan `LockService.getScriptLock()` dengan timeout 15 detik.
+### 2. Mekanisme Concurrency Lock & Anti-Collision
+Untuk mencegah *race condition* dan timeout saat N modul mengirim data secara simultan, GAS menerapkan `LockService.getScriptLock()` dengan timeout 30 detik serta lookup cepat `sheet.getLastRow()`. Di sisi firmware, ESP32 menerapkan *anti-collision staggering jitter* (penundaan transmisi teracak 0–25 detik berbasis MAC) sehingga puluhan node dapat mentransmisikan data tanpa bentrok.
 
 ### 3. Deteksi Anomali & Email Alerting
 GAS secara otomatis mengevaluasi parameter terhadap nilai ambang batas kritis:

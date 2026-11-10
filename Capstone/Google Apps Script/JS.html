@@ -199,8 +199,14 @@ function renderChart(key, trendData) {
         },
         y: {
           grid: { color: 'rgba(43, 56, 30, 0.5)', drawBorder: false },
-          suggestedMin: Math.min.apply(null, values) * 0.95,
-          suggestedMax: Math.max.apply(null, values) * 1.05
+          suggestedMin: (function() {
+            var valid = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+            return valid.length > 0 ? Math.min.apply(null, valid) * 0.95 : 0;
+          })(),
+          suggestedMax: (function() {
+            var valid = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+            return valid.length > 0 ? Math.max.apply(null, valid) * 1.05 : 100;
+          })()
         }
       }
     }
@@ -235,21 +241,33 @@ function getStatusClass(field, value) {
 function updateCard(id, value, field, unit) {
   var numEl    = document.getElementById('val-' + id);
   var statusEl = document.getElementById('status-' + id);
-  if (!numEl || value === null || value === undefined) return;
+  if (!numEl) return;
+
+  // Tangani kondisi modul offline, sensor kosong, atau nilai null secara aman
+  if (value === null || value === undefined || value === "" || isNaN(parseFloat(value))) {
+    numEl.textContent = '--';
+    if (statusEl) {
+      statusEl.className = 'sensor-card__status';
+      statusEl.textContent = 'Tidak Ada Data';
+    }
+    return;
+  }
+
+  var numVal = parseFloat(value);
 
   // Flash animation
   numEl.classList.add('sensor-card__number--updating');
   setTimeout(function() { numEl.classList.remove('sensor-card__number--updating'); }, 600);
 
   // Format value
-  var display = field === 'lux' && value >= 1000
-    ? Math.round(value / 100) / 10 + 'k'
-    : parseFloat(value).toFixed(field === 'lux' ? 0 : 1);
+  var display = field === 'lux' && numVal >= 1000
+    ? Math.round(numVal / 100) / 10 + 'k'
+    : numVal.toFixed(field === 'lux' ? 0 : 1);
   numEl.textContent = display;
 
   // Status badge
   if (statusEl) {
-    var s = getStatusClass(field, parseFloat(value));
+    var s = getStatusClass(field, numVal);
     statusEl.className = 'sensor-card__status ' + s.cls;
     statusEl.textContent = s.label;
   }
@@ -260,6 +278,8 @@ function updateTrend(id, trendData, field) {
   if (!trendEl || !trendData || trendData.length < 2) return;
   var first = parseFloat(trendData[0][field]);
   var last  = parseFloat(trendData[trendData.length - 1][field]);
+  if (isNaN(first) || isNaN(last)) return;
+
   var delta = last - first;
   var arrow = delta > 0.1 ? '↗' : delta < -0.1 ? '↘' : '→';
   var sign  = delta > 0 ? '+' : '';
@@ -274,10 +294,19 @@ var loadingEl = document.getElementById('chart-loading');
 
 function onDataSuccess(result) {
   if (loadingEl) loadingEl.classList.add('hidden');
-  document.getElementById('js-system-status').textContent = 'Sistem Aktif';
+  
+  var statusBadge = document.getElementById('js-system-status');
+  var countText = (result && result.moduleCount) ? ' (' + result.moduleCount + ' Modul)' : '';
+  if (statusBadge) statusBadge.textContent = 'Sistem Aktif' + countText;
+
+  // Perbarui subtitle grafik secara dinamis sesuai jumlah modul terdaftar
+  var subtitleEl = document.getElementById('chart-subtitle');
+  if (subtitleEl && result && result.moduleCount) {
+    subtitleEl.textContent = 'Data spasial ' + result.moduleCount + ' Modul CAMP-AI Greenhouse';
+  }
 
   if (!result || !result.latest) {
-    document.getElementById('js-system-status').textContent = 'Belum Ada Data';
+    if (statusBadge) statusBadge.textContent = 'Belum Ada Data';
     return;
   }
 
