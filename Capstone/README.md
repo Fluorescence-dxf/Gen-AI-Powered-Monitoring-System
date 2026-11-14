@@ -2,7 +2,7 @@
 
 [![ESP32](https://img.shields.io/badge/Hardware-ESP32-blue.svg?logo=espressif)](https://www.espressif.com/)
 [![Google Apps Script](https://img.shields.io/badge/Backend-Google%20Apps%20Script-green.svg?logo=google)](https://developers.google.com/apps-script)
-[![Google Gemini 1.5 Flash](https://img.shields.io/badge/AI-Gemini%201.5%20Flash-orange.svg?logo=googlegemini)](https://ai.google.dev/)
+[![Google Gemini 2.5 Flash](https://img.shields.io/badge/AI-Gemini%202.5%20Flash%20%2B%20Auto--Failover-orange.svg?logo=googlegemini)](https://ai.google.dev/)
 [![Chart.js](https://img.shields.io/badge/Frontend-Chart.js-yellow.svg?logo=chartdotjs)](https://www.chartjs.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-lightgrey.svg)](LICENSE)
 [![Institution](https://img.shields.io/badge/Institution-IPB%20University-darkblue.svg)](https://ipb.ac.id/)
@@ -35,7 +35,7 @@
 5. [Skematik Hardware & Pinout](#-skematik-hardware--pinout)
 6. [Desain Mekanikal & Enclosure 3D](#-desain-mekanikal--enclosure-3d)
 7. [Infrastruktur Serverless Google Apps Script](#-infrastruktur-serverless-google-apps-script)
-8. [Integrasi Gemini 1.5 Flash (Context Engineering)](#-integrasi-gemini-15-flash-context-engineering)
+8. [Integrasi Google Gemini AI (Dynamic Multi-Model & Context Engineering)](#-integrasi-google-gemini-ai-dynamic-multi-model--context-engineering)
 9. [Dashboard Web Interaktif](#-dashboard-web-interaktif)
 10. [Hasil Pengujian & Validasi Lapangan](#-hasil-pengujian--validasi-lapangan)
 11. [Analisis Tekno-Ekonomi (BOM & Kelayakan)](#-analisis-tekno-ekonomi-bom--kelayakan)
@@ -48,7 +48,7 @@
 
 **CAMP-AI** (*Controlled-Atmosphere Microclimate Platform with Artificial Intelligence*) adalah sistem pemantauan lingkungan mikroklimat presisi berbiaya rendah (*low-cost*) yang dirancang untuk pertanian lingkungan terkendali (*Controlled Environment Agriculture* / CEA), khususnya budidaya hortikultura bernilai tinggi seperti **Melon Inthanon**.
 
-Sistem ini memecahkan kelemahan umum sensor kelembapan kapasitif konvensional (misalnya DHT11/DHT22/SHT2x) yang sering mengalami saturasi, drift permanen, dan kerusakan membran pada kondisi RH tinggi (>85%) dan kondensasi greenhouse tropis. CAMP-AI mengadopsi **prinsip Psikrometer Assmann berventilasi buatan** menggunakan sepasang termistor kedap air DS18B20 yang higienis, tahan lama, dan mudah dikalibrasi, dipadukan dengan **Google Apps Script (Serverless Cloud)** dan model fondasi **Google Gemini 1.5 Flash** untuk menyajikan rekomendasi agronomi berbasis data waktu nyata secara otomatis.
+Sistem ini memecahkan kelemahan umum sensor kelembapan kapasitif konvensional (misalnya DHT11/DHT22/SHT2x) yang sering mengalami saturasi, drift permanen, dan kerusakan membran pada kondisi RH tinggi (>85%) dan kondensasi greenhouse tropis. CAMP-AI mengadopsi **prinsip Psikrometer Assmann berventilasi buatan** menggunakan sepasang termistor kedap air DS18B20 yang higienis, tahan lama, dan mudah dikalibrasi, dipadukan dengan **Google Apps Script (Serverless Cloud)** dan arsitektur **Google Gemini AI (Gemini 2.5 Flash / 2.0 Flash dengan Dynamic Multi-Model Auto-Failover)** untuk menyajikan rekomendasi agronomi berbasis data waktu nyata secara otomatis.
 
 ![Dashboard Preview](Dokumentasi/dashboard.png)
 
@@ -124,7 +124,7 @@ flowchart TD
     end
 
     subgraph AI_Intelligence["Generative AI Agent"]
-        GEMINI["Google Gemini 1.5 Flash API"]
+        GEMINI["Google Gemini AI API (2.5 Flash + Dynamic Failover)"]
         PROMPT["Context-Engineered Agronomic Prompt"]
     end
 
@@ -212,18 +212,18 @@ $$\text{RH} = \left( \frac{e_a}{e_s(T_d)} \right) \times 100\%$$
 ┌─────────────────────────────────────────────────────────────┐
 │                       ESP32 DEVKIT V1                       │
 │                                                             │
-│   GPIO19 ─────────────────── DS18B20 Suhu Bola Kering (DQ)   │
-│   GPIO16 ─────────────────── DS18B20 Suhu Bola Basah (DQ)    │
-│   GPIO26 ─────────────────── Relay / Transistor Driver Kipas │
-│   GPIO21 (SDA) ───────────── BH1750 SDA (Khusus Node 1)      │
-│   GPIO22 (SCL) ───────────── BH1750 SCL (Khusus Node 1)      │
+│   GPIO25 ─────────────────── DS18B20 Suhu Bola Kering (DQ)   │
+│   GPIO33 ─────────────────── DS18B20 Suhu Bola Basah (DQ)    │
+│   GPIO19 ─────────────────── Relay / Transistor Driver Kipas │
+│   GPIO21 (SDA) ───────────── BH1750 SDA (Auto-Detect I2C)    │
+│   GPIO22 (SCL) ───────────── BH1750 SCL (Auto-Detect I2C)    │
 │   3V3 / 5V ───────────────── VCC Sensor & VCC Relay          │
 │   GND ────────────────────── Common Ground                   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 > [!NOTE]
-> Kedua jalur data DS18B20 (GPIO19 dan GPIO16) masing-masing dipasang resistor *pull-up* 4.7 kΩ ke pin 3.3V untuk memastikan stabilitas protokol transmisi 1-Wire.
+> Kedua jalur data DS18B20 (GPIO25 dan GPIO33) masing-masing dipasang resistor *pull-up* 4.7 kΩ ke pin 3.3V untuk memastikan stabilitas protokol transmisi 1-Wire.
 
 ---
 
@@ -248,7 +248,9 @@ Berkas model 3D siap cetak (*Stereolithography* / STL) tersedia pada direktori [
 CAMP-AI memanfaatkan **Google Apps Script (GAS)** sebagai backend serverless tanpa biaya hosting langganan (*Zero Cloud Server Cost*), yang terintegrasi langsung dengan **Google Sheets** sebagai database relasional sederhana.
 
 ### 1. Ingestion Data Horisontal Dinamis Multi-Node (1 s.d. N Node) (`doPost`)
-Ketika node-node (Module 1 s.d. Module N) mengirimkan data ke endpoint GAS, data tidak ditumpuk menjadi baris-baris terpisah. Algoritma `processHorizontalData()` bersama `ensureModuleColumns()` secara otomatis meregistrasi modul baru dan mengelompokkan data yang tiba dalam **jendela waktu 3 menit (180.000 ms)** ke dalam baris yang sama:
+Ketika node-node (Module 1 s.d. Module N) mengirimkan data ke endpoint GAS, algoritma `processHorizontalData()` bersama `ensureModuleColumns()` secara otomatis meregistrasi modul baru dan mengatur penempatan baris secara cerdas:
+- **Penggabungan Multi-Modul:** Jika modul berbeda mengirim data dalam **jendela waktu 3 menit (180.000 ms)** dan kolom modul tersebut pada baris terakhir masih kosong, data digabungkan secara horizontal pada baris yang sama tanpa menggeser timestamp awal baris.
+- **Proteksi Mode Modul Tunggal (Anti-Overwrite):** Jika modul yang sama mengirim siklus baru (misalnya saat hanya mengoperasikan 1 modul), sistem mendeteksi bahwa kolom modul tersebut pada baris terakhir sudah terisi dan otomatis mengalokasikan baris baru sehingga data sebelumnya tidak pernah tertimpa.
 
 | Kolom Dinamis (1 s.d. N) | Kolom Timestamp | Kolom Average |
 | :--- | :--- | :--- |
@@ -266,11 +268,16 @@ Jika terjadi anomali, sistem mengirimkan notifikasi peringatan via `MailApp.send
 
 ---
 
-## 🤖 Integrasi Gemini 1.5 Flash (Context Engineering)
+## 🤖 Integrasi Google Gemini AI (Dynamic Multi-Model & Context Engineering)
 
-Model fondasi **Google Gemini 1.5 Flash** difungsikan sebagai konsultan agronomi otonom (*Virtual Greenhouse Agronomist*). 
+Sistem kecerdasan buatan **CAMP-AI** difungsikan sebagai konsultan agronomi otonom (*Virtual Greenhouse Agronomist*) yang didukung oleh arsitektur **Dynamic Model Discovery & Multi-Model Auto-Failover** pada Google Generative Language API (`v1beta`).
 
-### Context Engineering Architecture
+### 1. Dynamic Model Discovery & Auto-Failover (`getAvailableGeminiModels`)
+Untuk menjamin keandalan layanan terhadap perubahan siklus hidup model atau lonjakan trafik (*HTTP 503 High Demand*, *HTTP 429 Rate Limit*, maupun *HTTP 404 Model Deprecated*):
+- Backend secara otomatis memanggil endpoint `https://generativelanguage.googleapis.com/v1beta/models` untuk mendeteksi seluruh model aktif yang mendukung metode `generateContent` pada akun API pengguna, memprioritaskan keluarga model **Flash** terbaru (**`gemini-2.5-flash`**, **`gemini-2.0-flash`**, **`gemini-flash-latest`**), dan menyimpannya di `CacheService` selama 6 jam.
+- Apabila model utama mengalami beban puncak atau pembatasan kuota, `askGemini()` secara transparan melakukan *failover* berurutan ke kandidat model berikutnya tanpa memutus pengalaman konsultasi pengguna.
+
+### 2. Context Engineering Architecture
 Setiap kali pengguna mengajukan pertanyaan di dashboard web, backend Google Apps Script secara dinamis menyusun *prompt* yang memadukan 4 pilar konteks:
 1. **System Persona:** Ahli agronomi dan iklim mikro berpengalaman untuk pertanian presisi tropis.
 2. **Real-time Spatial Averages:** Data sensor terkini (Suhu Kering, Suhu Basah, RH, Intensitas Cahaya).
@@ -292,7 +299,7 @@ Setiap kali pengguna mengajukan pertanyaan di dashboard web, backend Google Apps
 │ "Kondisi siang ini cukup terik, apakah perlu menyalakan misting?"      │
 │                                                                        │
 │ ────────────────────────────────────────────────────────────────────── │
-│ [REKOMENDASI GEMINI 1.5 FLASH]                                         │
+│ [REKOMENDASI GEMINI 2.5 FLASH]                                         │
 │ "Kondisi saat ini: Suhu 33.4°C cukup tinggi dengan RH 63.8% yang masih │
 │ moderat. Rekomendasi tindakan:                                         │
 │ 1. Jangan menyalakan misting berlebihan sekarang karena RH masih di    │
@@ -366,24 +373,24 @@ Pada greenhouse budidaya Melon Inthanon seluas 200 m² (populasi ~600 tanaman) d
    - `OneWire` by Paul Stoffregen
    - `BH1750` by Christopher Laws
    - `WiFiManager` by tzapu
-4. Buka berkas [`Capstone/Capstone.ino`](Capstone/Capstone.ino).
+4. Buka berkas [`Firmware/Capstone/Capstone.ino`](Firmware/Capstone/Capstone.ino).
 5. Sesuaikan parameter pada baris konfigurasi:
    - Masukkan `SCRIPT_URL` yang didapat dari deployment Google Apps Script.
-   - Atur `MODULE_ID` (`Module1`, `Module2`, atau `Module3`).
-   - Atur `HAS_LUX_SENSOR` ke `true` hanya untuk Module1.
+   - Atur `MODULE_ID_CONFIG` (`Module1`, `Module2`, `Module3`, atau biarkan `"AUTO"` untuk penamaan otomatis berbasis MAC Address).
+   - Sensor cahaya BH1750 akan dideteksi secara otomatis melalui bus I2C saat booting.
 6. Sambungkan ESP32 via kabel USB dan lakukan **Upload**.
 7. Pada penyalaan pertama, ESP32 akan memancarkan WiFi Access Point bernama `CAMP-AI_ModuleX`. Sambungkan ponsel/laptop ke AP tersebut, masukkan kata sandi `campai123`, dan pilih WiFi greenhouse Anda melalui Captive Portal.
 
 ### 2. Persiapan Cloud Backend (Google Apps Script)
 1. Buka [Google Drive](https://drive.google.com/) Anda dan buat proyek baru di [Google Apps Script](https://script.google.com/).
 2. Buat berkas-berkas kode di editor GAS:
-   - `Kode.gs` $\leftarrow$ salin dari [`Google Apps Script/Kode.gs`](Capstone/Google%20Apps%20Script/Kode.gs)
-   - `Index.html` $\leftarrow$ salin dari [`Google Apps Script/Index.html`](Capstone/Google%20Apps%20Script/Index.html)
-   - `CSS.html` $\leftarrow$ salin dari [`Google Apps Script/CSS.html`](Capstone/Google%20Apps%20Script/CSS.html)
-   - `JS.html` $\leftarrow$ salin dari [`Google Apps Script/JS.html`](Capstone/Google%20Apps%20Script/JS.html)
+   - `Kode.gs` $\leftarrow$ salin dari [`Google Apps Script/Kode.gs`](Google%20Apps%20Script/Kode.gs)
+   - `Index.html` $\leftarrow$ salin dari [`Google Apps Script/Index.html`](Google%20Apps%20Script/Index.html)
+   - `CSS.html` $\leftarrow$ salin dari [`Google Apps Script/CSS.html`](Google%20Apps%20Script/CSS.html)
+   - `JS.html` $\leftarrow$ salin dari [`Google Apps Script/JS.html`](Google%20Apps%20Script/JS.html)
 3. Buka **Project Settings** (ikon roda gigi di menu kiri) $\rightarrow$ **Script Properties** $\rightarrow$ Tambahkan property:
    - `GEMINI_API_KEY`: Kunci API Anda dari [Google AI Studio](https://aistudio.google.com/).
-   - `GEMINI_MODEL`: `gemini-flash-latest`
+   - `GEMINI_MODEL` *(opsional)*: Default `gemini-2.5-flash` (sistem otomatis melakukan *discovery* dan *failover* ke model Gemini aktif yang tersedia pada API Key Anda).
 4. Jalankan fungsi `setup()` sekali dari editor kode untuk membuat database Spreadsheet secara otomatis.
 5. Klik **Deploy** $\rightarrow$ **New Deployment**:
    - Pilih jenis: **Web App**

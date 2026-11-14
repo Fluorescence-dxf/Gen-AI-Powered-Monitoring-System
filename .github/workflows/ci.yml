@@ -29,6 +29,6 @@ jobs:
           arduino-cli lib install "BH1750"
           arduino-cli lib install "WiFiManager"
       - name: Copy config template
-        run: cp Capstone/Firmware/config.h.example Capstone/Firmware/config.h
+        run: cp Capstone/Firmware/config.h.example Capstone/Firmware/Capstone/config.h
       - name: Compile firmware
-        run: arduino-cli compile --fqbn esp32:esp32:esp32 Capstone/Firmware/Capstone.ino
+        run: arduino-cli compile --fqbn esp32:esp32:esp32 Capstone/Firmware/Capstone/Capstone.ino

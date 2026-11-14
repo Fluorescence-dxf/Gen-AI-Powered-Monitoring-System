@@ -23,10 +23,29 @@
 #include <HTTPClient.h>
 #include <time.h>
 #include <WiFiManager.h>
+#include <esp_system.h>
+#if __has_include(<esp_mac.h>)
+  #include <esp_mac.h>
+#endif
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
+
+// ─── TIPE DATA STRUKTUR SENSOR (Didefinisikan di atas agar dikenali compiler) ─
+typedef struct { 
+  float lux; 
+  float dryTemp; 
+  float wetTemp; 
+  float rh; 
+  bool valid; 
+} SensorData;
+
+// Forward declaration fungsi untuk kepatuhan C++ Arduino IDE
+SensorData readSensors();
+bool sendData(SensorData data, struct tm* t);
 
 // ─── USER CONFIGURATION ─────────────────────────────────────────────────────
 // Ganti dengan URL Google Apps Script Web App Deployment Anda:
-const char* SCRIPT_URL        = "SCRIPT_URL";
+const char* SCRIPT_URL        = "https://script.google.com/macros/s/AKfycbxYMh0M774TuxeMufAD4C-5Wti5IuoTMD6YSQ3JU6XIkiiZ0qvd9qbY33PQJ__b4fV2wA/exec";
 
 // ============================================================================
 // IDENTITAS MODUL & SKALABILITAS DINAMIS (1 s.d. N Modul)
@@ -40,9 +59,22 @@ String      currentModuleId   = "";
 bool        hasLuxSensor      = false; 
 
 // ─── PIN ASSIGNMENT (ESP32) ────────────────────────────────────────────────
-#define DRY_BULB_PIN  19   // Pin OneWire Sensor Suhu Bola Kering (DS18B20)
-#define WET_BULB_PIN  16   // Pin OneWire Sensor Suhu Bola Basah (DS18B20)
-#define FAN_PIN       26   // Pin Kontrol Relay Kipas Aspirasi Psikrometer
+#define DRY_BULB_PIN  25   // Pin OneWire Sensor Suhu Bola Kering (DS18B20)
+#define WET_BULB_PIN  33   // Pin OneWire Sensor Suhu Bola Basah (DS18B20)
+#define FAN_PIN       19   // Pin Kontrol Relay Kipas Aspirasi Psikrometer
+
+// ─── LOGIKA TRIGGER RELAY ──────────────────────────────────────────────────
+// Mayoritas modul relay 5V untuk Arduino/ESP32 adalah ACTIVE LOW (LOW = Relay ON).
+// Jika relay Anda tipe Active HIGH (atau jumper disetel ke HIGH), ubah nilai ini ke false.
+#define RELAY_ACTIVE_LOW  false
+
+inline void turnFanOn() {
+  digitalWrite(FAN_PIN, RELAY_ACTIVE_LOW ? LOW : HIGH);
+}
+
+inline void turnFanOff() {
+  digitalWrite(FAN_PIN, RELAY_ACTIVE_LOW ? HIGH : LOW);
+}
 
 // ─── WAKTU & JADWAL PENGIRIMAN ─────────────────────────────────────────────
 const char* NTP_SERVER       = "pool.ntp.org";
@@ -51,7 +83,7 @@ const int   DST_OFFSET       = 0;
 const int   SAMPLING_SECONDS = 60;         // Durasi sampling kipas aktif (detik)
 const int   START_HOUR       = 0;          // Jam mulai pengiriman (0 - 24 untuk 24 jam)
 const int   END_HOUR         = 24;         // Jam henti pengiriman
-const int   INTERVAL_MIN     = 15;         // Siklus pengiriman (menit). Ubah ke 2 untuk testing cepat.
+const int   INTERVAL_MIN     = 2;         // Siklus pengiriman (menit). Ubah ke 2 untuk testing cepat.
 // ────────────────────────────────────────────────────────────────────────────
 
 BH1750 lightMeter;
@@ -59,14 +91,6 @@ OneWire dryWire(DRY_BULB_PIN);
 OneWire wetWire(WET_BULB_PIN);
 DallasTemperature drySensor(&dryWire);
 DallasTemperature wetSensor(&wetWire);
-
-struct SensorData { 
-  float lux; 
-  float dryTemp; 
-  float wetTemp; 
-  float rh; 
-  bool valid; 
-};
 
 /**
  * Mengambil waktu lokal terkini dalam bentuk struct tm
@@ -112,7 +136,7 @@ SensorData readSensors() {
   SensorData result = {0, 0, 0, 0, false};
   
   // 1. Nyalakan kipas aspirasi untuk sirkulasi udara di kain basah
-  digitalWrite(FAN_PIN, HIGH);
+  turnFanOn();
   Serial.println("\n[Sistem] Menyalakan Kipas Aspirasi, stabilisasi 5 detik...");
   delay(5000);
 
@@ -158,7 +182,7 @@ SensorData readSensors() {
   }
   
   // 2. Matikan kipas setelah periode sampling selesai
-  digitalWrite(FAN_PIN, LOW);
+  turnFanOff();
   Serial.println("[Sistem] Periode sampling selesai, kipas dimatikan.");
 
   if (count > 0) {
@@ -187,6 +211,19 @@ SensorData readSensors() {
 }
 
 /**
+ * Mendapatkan MAC Address perangkat langsung dari eFuse hardware
+ * Aman dipanggil kapan saja tanpa memerlukan inisialisasi driver WiFi
+ */
+String getDeviceMac() {
+  uint8_t mac[6];
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);
+  char buf[20];
+  snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  return String(buf);
+}
+
+/**
  * Menghasilkan Module ID dinamis berbasis MAC jika disetel ke "AUTO"
  */
 String resolveModuleId() {
@@ -194,7 +231,7 @@ String resolveModuleId() {
     return String(MODULE_ID_CONFIG);
   }
   uint8_t mac[6];
-  WiFi.macAddress(mac);
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);
   char buf[20];
   snprintf(buf, sizeof(buf), "Module_%02X%02X", mac[4], mac[5]);
   return String(buf);
@@ -227,14 +264,14 @@ bool sendData(SensorData data, struct tm* t) {
   // Mencegah N node menabrak LockService Google Apps Script di detik yang persis sama.
   // Delay dihitung semi-deterministik berdasarkan byte MAC address (0 - 25 detik).
   uint8_t mac[6];
-  WiFi.macAddress(mac);
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);
   int staggerMs = ((mac[5] + mac[4]) % 25) * 1000 + random(200, 1500);
   Serial.printf("[Stagger] Menunda pengiriman selama %d ms untuk mencegah tabrakan konkurensi...\n", staggerMs);
   delay(staggerMs);
 
   String payload = "{";
   payload += "\"module\":\"" + currentModuleId + "\",";
-  payload += "\"mac\":\"" + WiFi.macAddress() + "\",";
+  payload += "\"mac\":\"" + getDeviceMac() + "\",";
   if (hasLuxSensor && data.lux >= 0) { 
     payload += "\"lux\":" + String(data.lux, 2) + ","; 
   } else { 
@@ -283,6 +320,13 @@ bool sendData(SensorData data, struct tm* t) {
 }
 
 void setup() {
+  // 1. Matikan Brownout Detector hardware agar lonjakan arus USB komputer tidak memicu reboot berulang
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+
+  // 2. Segera kunci pin relay dalam kondisi MATI (OFF) di awal booting sebelum komponen lain aktif
+  pinMode(FAN_PIN, OUTPUT); 
+  turnFanOff();
+
   Serial.begin(115200);
   delay(1000);
 
@@ -301,23 +345,33 @@ void setup() {
 
   Serial.println("\n\n==========================================");
   Serial.printf(" Inisialisasi CAMP-AI Node: %s\n", currentModuleId.c_str());
-  Serial.printf(" MAC Address ESP32: %s\n", WiFi.macAddress().c_str());
+  Serial.printf(" MAC Address ESP32: %s\n", getDeviceMac().c_str());
   Serial.printf(" Fitur Sensor Lux : %s\n", hasLuxSensor ? "Aktif" : "Non-aktif");
   Serial.println("==========================================");
 
-  pinMode(FAN_PIN, OUTPUT); 
-  digitalWrite(FAN_PIN, LOW);
-
   drySensor.begin(); 
   wetSensor.begin();
-  
+
   // Inisialisasi WiFiManager dengan SSID AP unik per modul
   WiFiManager wm;
-  wm.setConfigPortalTimeout(180); // Timeout 3 menit jika tidak ada input pengguna
+  wm.setDebugOutput(true);        // Tampilkan seluruh proses pencarian & AP di Serial Monitor
+  wm.setConnectTimeout(10);       // Maksimal 10 detik coba hubungkan ke WiFi lama (agar cepat buka AP)
+  wm.setConfigPortalTimeout(180); // Timeout portal 3 menit jika tidak ada konfigurasi
 
   String apName = "CAMP-AI_" + currentModuleId;
   Serial.printf("[WiFi] Memeriksa WiFi tersimpan atau membuka AP Portal: %s\n", apName.c_str());
-  
+
+  // Callback penanda saat Access Point benar-benar mulai memancar di udara
+  wm.setAPCallback([](WiFiManager *myWM) {
+    Serial.println("\n**************************************************");
+    Serial.println(">> [AP PORTAL AKTIF] ESP32 Sedang Memancarkan WiFi!");
+    Serial.printf(">> Nama WiFi (SSID) : %s\n", myWM->getConfigPortalSSID().c_str());
+    Serial.println(">> Kata Sandi (PW)  : campai123");
+    Serial.println(">> IP Konfigurasi   : 192.168.4.1");
+    Serial.println(">> Tips: Matikan lalu nyalakan kembali WiFi di HP/Laptop agar daftar SSID ter-refresh!");
+    Serial.println("**************************************************\n");
+  });
+
   if (!wm.autoConnect(apName.c_str(), "campai123")) {
     Serial.println("[WiFi] Gagal terhubung dan batas waktu timeout tercapai.");
     Serial.println("[Sistem] Merestart ESP32...");

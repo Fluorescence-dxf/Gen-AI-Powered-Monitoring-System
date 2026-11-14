@@ -8,9 +8,9 @@
 
 [![IPB University](https://img.shields.io/badge/University-IPB%20University-darkblue.svg)](https://ipb.ac.id/)
 [![Major](https://img.shields.io/badge/Major-Mechanical%20%26%20Biosystem%20Engineering-green.svg)](https://tmb.ipb.ac.id/)
-[![Hardware](https://img.shields.io/badge/Hardware-ESP32%20%7C%20DS18B20%20%7C%20BH1750-blue.svg)](Capstone/Firmware/Capstone.ino)
+[![Hardware](https://img.shields.io/badge/Hardware-ESP32%20%7C%20DS18B20%20%7C%20BH1750-blue.svg)](Capstone/Firmware/Capstone/Capstone.ino)
 [![Backend](https://img.shields.io/badge/Backend-Google%20Apps%20Script%20(Serverless)-darkgreen.svg)](Capstone/Google%20Apps%20Script/Kode.gs)
-[![AI Agent](https://img.shields.io/badge/AI-Google%20Gemini%20Flash%20Latest-orange.svg)](Capstone/Google%20Apps%20Script/Kode.gs)
+[![AI Agent](https://img.shields.io/badge/AI-Google%20Gemini%202.5%20Flash%20%2B%20Auto--Failover-orange.svg)](Capstone/Google%20Apps%20Script/Kode.gs)
 [![License: MIT](https://img.shields.io/badge/License-MIT-lightgrey.svg)](LICENSE)
 [![GitHub repo size](https://img.shields.io/github/repo-size/Fluorescence-dxf/Gen-AI-Powered-Monitoring-System)](https://github.com/Fluorescence-dxf/Gen-AI-Powered-Monitoring-System)
 
@@ -45,8 +45,8 @@
 ### Keunggulan Utama:
 1. **Ketahanan Kelembapan Ekstrem (>85% RH):** Menggantikan sensor kapasitif film tipis yang rentan saturasi/rusak dengan **Psikrometer Assmann aspirasi paksa** berbasis sensor suhu kedap air DS18B20 ganda (bola kering dan bola basah berventilasi).
 2. **Formulasi Psikrometrik Standar BMKG:** Menghitung kelembapan relatif mengacu pada **Perka BMKG No. 04 Tahun 2026** ($A = 0.0007947 \text{ }^\circ\text{C}^{-1}$) dengan akurasi galat $\pm 2.4\%$.
-3. **Arsitektur Serverless Zero-Cost:** Menggunakan **Google Apps Script** dan **Google Sheets** dengan algoritma *horizontal data grouping* multi-node (Depan, Tengah, Belakang) dalam time-window 3 menit serta mekanisme *concurrency locking*.
-4. **Autonomous Agronomic Advisor:** Model fondasi **Google Gemini 1.5 Flash** yang diinjeksi konteks sensor spasial real-time untuk memberikan rekomendasi tindakan mikroklimat praktis (ventilasi, evaporative misting, shading) secara langsung kepada pengelola greenhouse.
+3. **Arsitektur Serverless Zero-Cost:** Menggunakan **Google Apps Script** dan **Google Sheets** dengan algoritma *horizontal data grouping* multi-node (Depan, Tengah, Belakang) dalam time-window 3 menit, proteksi *anti-overwrite* saat berjalan dalam mode 1 modul, serta mekanisme *concurrency locking*.
+4. **Autonomous Agronomic Advisor:** Arsitektur **Google Gemini AI (Gemini 2.5 Flash / 2.0 Flash dengan Dynamic Multi-Model Auto-Failover)** yang diinjeksi konteks sensor spasial real-time untuk memberikan rekomendasi tindakan mikroklimat praktis (ventilasi, evaporative misting, shading) secara langsung kepada pengelola greenhouse.
 5. **Ultra Low-Cost & High ROI:** Biaya komponen per node **< Rp 250.000** (menghemat hingga 95% dibanding stasiun cuaca industri Rp 15–40 juta) dengan *payback period* investasi kurang dari 1 siklus tanam (~70 hari).
 
 ---
@@ -75,7 +75,7 @@ flowchart LR
     end
 
     subgraph AI["Generative AI Layer"]
-        GEM["Google Gemini 1.5 Flash"]
+        GEM["Google Gemini 2.5 Flash<br/>(Dynamic Multi-Model Failover)"]
         PROMPT["Context Engineering<br/>Sensor + Komoditas"]
     end
 
@@ -112,7 +112,8 @@ flowchart LR
 │                          │ • Chart.js Interactive Time-Series Charts   │
 │                          │ • REST API & JSON Payload Ingestion         │
 ├──────────────────────────┼─────────────────────────────────────────────┤
-│ 3. Artificial Intel.     │ • Google Gemini 1.5 Flash API Integration   │
+│ 3. Artificial Intel.     │ • Google Gemini 2.5 Flash API & Failover    │
+│                          │ • Dynamic Model Discovery (ListModels API)  │
 │                          │ • Context Engineering & Prompt Optimization │
 │                          │ • Anomaly Detection & Microclimate Alerts   │
 ├──────────────────────────┼─────────────────────────────────────────────┤
@@ -135,8 +136,8 @@ flowchart LR
     ├── Capstone/                              # Direktori Utama Proyek CAMP-AI
     │   ├── README.md                          # Dokumentasi teknis mendalam CAMP-AI
     │   ├── Firmware/                          # Kode Firmware Mikrokontroler
-    │   │   ├── Capstone.ino                   # Firmware ESP32 (BMKG Psychrometer + WiFiManager)
-    │   │   └── config.h.example              # Template konfigurasi node sensor
+    │   │   ├── Capstone/Capstone.ino          # Firmware ESP32 (BMKG Psychrometer + WiFiManager)
+    │   │   └── config.h.example               # Template konfigurasi node sensor
     │   ├── Desain/                            # Berkas 3D CAD Enclosure siap cetak (STL)
     │   │   ├── Bagian Atas_Capstone.stl
     │   │   ├── Bagian Bawah_Capstone.stl
@@ -170,10 +171,10 @@ flowchart LR
 ## 🚀 Panduan Cepat Memulai (Quick Start)
 
 ### 1. Flash Firmware Node ESP32
-1. Buka berkas [`Capstone/Capstone.ino`](Capstone/Firmware/Capstone.ino) pada Arduino IDE.
+1. Buka berkas [`Capstone/Firmware/Capstone/Capstone.ino`](Capstone/Firmware/Capstone/Capstone.ino) pada Arduino IDE.
 2. Pasang pustaka pendukung: `DallasTemperature`, `OneWire`, `BH1750`, dan `WiFiManager`.
 3. Sesuaikan `SCRIPT_URL` dengan URL deployment Google Apps Script Anda.
-4. Pilih identitas modul (`Module1`, `Module2`, atau `Module3`).
+4. Pilih identitas modul pada `MODULE_ID_CONFIG` (`Module1`, `Module2`, `Module3`, atau `"AUTO"`).
 5. Unggah ke board ESP32. Sambungkan ke WiFi Access Point `CAMP-AI_ModuleX` untuk konfigurasi koneksi jaringan.
 
 ### 2. Deploy Google Apps Script

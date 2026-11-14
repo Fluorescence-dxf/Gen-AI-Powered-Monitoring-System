@@ -9,8 +9,9 @@
  *                         agregasi data horizontal 3 modul ke Google Sheets.
  * 2. getDashboardData() : Menyediakan API data sensor terkini & riwayat tren 
  *                         untuk visualisasi Chart.js pada Web Dashboard.
- * 3. askGemini()        : Integrasi Gemini 1.5 Flash dengan agronomic context 
- *                         engineering untuk konsultasi cerdas kondisi greenhouse.
+ * 3. askGemini()        : Integrasi Google Gemini AI (Gemini 2.5 Flash & 
+ *                         Dynamic Multi-Model Failover) dengan agronomic 
+ *                         context engineering untuk konsultasi greenhouse.
  * 4. doGet()            : Web App renderer untuk antarmuka dashboard responsif.
  * ============================================================================
  */
@@ -47,10 +48,10 @@ function setup() {
     props.setProperty("SPREADSHEET_ID", ss.getId());
   }
 
-  // Set default Gemini model jika belum ada (gunakan gemini-1.5-flash yang memiliki kuota kapasitas stabil)
+  // Set default Gemini model jika belum ada (gunakan gemini-2.5-flash dengan dukungan auto-failover dinamis)
   const currentModel = props.getProperty("GEMINI_MODEL");
   if (!currentModel) {
-    props.setProperty("GEMINI_MODEL", "gemini-1.5-flash");
+    props.setProperty("GEMINI_MODEL", "gemini-2.5-flash");
   }
 
   // Setup Sheet RawData jika belum ada (Skema Standar 3 Modul + Dukungan N-Modul Dinamis)
@@ -292,35 +293,7 @@ function processHorizontalData(sheet, dataRow) {
     headerMap = getHeaderMap(sheet); // Segarkan peta kolom setelah pergeseran
   }
 
-  // 2. Cari baris target secara instan via getLastRow() tanpa scan kolom K:K
-  const lastRow = sheet.getLastRow();
-  let targetRowIndex = -1;
-  
-  if (lastRow > 2) {
-    const lastTimestamp = sheet.getRange(lastRow, headerMap.timestampCol).getValue();
-    let tsDate = null;
-    if (lastTimestamp instanceof Date) {
-      tsDate = lastTimestamp;
-    } else if (lastTimestamp) {
-      const parsed = new Date(lastTimestamp);
-      if (!isNaN(parsed.getTime())) tsDate = parsed;
-    }
-
-    if (tsDate) {
-      const diffMs = Math.abs(now.getTime() - tsDate.getTime());
-      // Gabungkan modul ke baris yang sama bila selisih waktu < 3 menit
-      if (diffMs < CONFIG.AGGREGATION_WINDOW_MS) { 
-        targetRowIndex = lastRow; 
-      }
-    }
-  }
-  
-  // 3. Jika di luar jendela agregasi, alokasikan baris baru
-  if (targetRowIndex === -1) {
-    targetRowIndex = Math.max(lastRow + 1, 3);
-  }
-
-  // Hitung jumlah kolom minimum yang diperlukan agar array mencakup seluruh parameter
+  // 2. Hitung jumlah kolom minimum yang diperlukan agar array mencakup seluruh parameter
   let maxColNeeded = Math.max(sheet.getLastColumn(), 14, headerMap.timestampCol, headerMap.avgCols.rh);
   Object.values(headerMap.modules).forEach(m => {
     if (m.dryCol > maxColNeeded) maxColNeeded = m.dryCol;
@@ -329,14 +302,60 @@ function processHorizontalData(sheet, dataRow) {
     if (m.luxCol > maxColNeeded) maxColNeeded = m.luxCol;
   });
 
-  // Baca seluruh nilai baris target ke memori
-  let rowVals = sheet.getRange(targetRowIndex, 1, 1, maxColNeeded).getValues()[0];
-  while (rowVals.length < maxColNeeded) {
-    rowVals.push("");
+  // 3. Evaluasi baris terakhir: gabungkan ke baris yang sama HANYA jika:
+  //    (a) Masih dalam jendela waktu agregasi (AGGREGATION_WINDOW_MS), DAN
+  //    (b) Kolom milik modul yang sedang mengirim ini BELUM terisi pada baris tersebut.
+  //    Jika modul yang sama mengirim data lagi (misal hanya menggunakan 1 modul),
+  //    kolom modul tersebut sudah terisi sehingga otomatis membuat baris baru tanpa menimpa data lama.
+  const lastRow = sheet.getLastRow();
+  let targetRowIndex = -1;
+  let rowVals = null;
+
+  if (lastRow > 2) {
+    const lastRowVals = sheet.getRange(lastRow, 1, 1, maxColNeeded).getValues()[0];
+    while (lastRowVals.length < maxColNeeded) {
+      lastRowVals.push("");
+    }
+
+    const lastTimestamp = lastRowVals[headerMap.timestampCol - 1];
+    let tsDate = null;
+    if (lastTimestamp instanceof Date) {
+      tsDate = lastTimestamp;
+    } else if (lastTimestamp) {
+      const parsed = new Date(lastTimestamp);
+      if (!isNaN(parsed.getTime())) tsDate = parsed;
+    }
+
+    const isColFilled = (colIdx) => {
+      if (colIdx <= 0 || colIdx > lastRowVals.length) return false;
+      const val = lastRowVals[colIdx - 1];
+      return val !== "" && val !== null && val !== undefined;
+    };
+
+    const moduleAlreadyHasData =
+      isColFilled(modCols.dryCol) ||
+      isColFilled(modCols.wetCol) ||
+      isColFilled(modCols.rhCol) ||
+      isColFilled(modCols.luxCol);
+
+    if (tsDate && !moduleAlreadyHasData) {
+      const diffMs = Math.abs(now.getTime() - tsDate.getTime());
+      if (diffMs < CONFIG.AGGREGATION_WINDOW_MS) {
+        targetRowIndex = lastRow;
+        rowVals = lastRowVals;
+      }
+    }
   }
-  
-  // Set Timestamp pada kolom timestamp
-  rowVals[headerMap.timestampCol - 1] = now;
+
+  // Jika di luar jendela agregasi atau modul ini sudah mengisi baris terakhir, alokasikan baris baru
+  if (targetRowIndex === -1) {
+    targetRowIndex = Math.max(lastRow + 1, 3);
+    rowVals = new Array(maxColNeeded).fill("");
+    rowVals[headerMap.timestampCol - 1] = now;
+  } else if (!rowVals[headerMap.timestampCol - 1]) {
+    // Pertahankan timestamp awal baris saat menggabungkan modul lain agar jendela waktu tidak bergeser terus
+    rowVals[headerMap.timestampCol - 1] = now;
+  }
 
   // 4. Masukkan data sensor modul ke array rowVals secara numerik
   if (modCols.dryCol > 0 && dataRow.dryTemp !== undefined && dataRow.dryTemp !== null && String(dataRow.dryTemp).trim() !== "") {
@@ -468,7 +487,23 @@ function getDashboardData() {
   const latest = recentData[recentData.length - 1];
   const safeDate = (dateObj) => (dateObj instanceof Date) ? dateObj.toISOString() : String(dateObj);
   
-  const activeModules = Object.keys(headerMap.modules);
+  // Hitung modul unik yang aktif pada baris terbaru (tanpa duplikasi alias spasi)
+  const uniqueModules = [];
+  const activeInLatest = [];
+  const seenSigs = new Set();
+  Object.keys(headerMap.modules).forEach(modId => {
+    const m = headerMap.modules[modId];
+    const sig = `${m.dryCol}_${m.wetCol}_${m.rhCol}`;
+    if (seenSigs.has(sig)) return;
+    seenSigs.add(sig);
+    uniqueModules.push(modId);
+
+    const hasVal = (colIdx) => colIdx > 0 && colIdx <= latest.length && latest[colIdx - 1] !== "" && latest[colIdx - 1] !== null && latest[colIdx - 1] !== undefined;
+    if (hasVal(m.dryCol) || hasVal(m.wetCol) || hasVal(m.rhCol) || hasVal(m.luxCol)) {
+      activeInLatest.push(modId);
+    }
+  });
+  const activeModules = activeInLatest.length > 0 ? activeInLatest : uniqueModules;
   
   return {
     moduleCount: activeModules.length,
